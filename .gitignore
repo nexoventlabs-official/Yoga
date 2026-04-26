@@ -1,0 +1,52 @@
+# ─── Dependencies ─────────────────────────────────────
+node_modules/
+**/node_modules/
+
+# ─── Build output ────────────────────────────────────
+dist/
+build/
+**/dist/
+**/build/
+
+# ─── Environment & secrets ───────────────────────────
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# RSA / TLS keys, certificates
+*.pem
+*.key
+flow_keys/
+**/flow_keys/
+
+# ─── Logs ────────────────────────────────────────────
+*.log
+logs/
+**/logs/
+flow-debug.log
+ngrok.out.log
+ngrok.err.log
+server.out.log
+server.err.log
+frontend.out.log
+frontend.err.log
+
+# ─── Uploads (runtime user content) ──────────────────
+uploads/
+**/uploads/
+
+# ─── OS / Editor ─────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ─── Misc ────────────────────────────────────────────
+coverage/
+.nyc_output/
+.cache/
