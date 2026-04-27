@@ -4,6 +4,14 @@ const chatbot = require('../services/chatbot');
 const meta = require('../services/metaCloud');
 const Pdf = require('../models/Pdf');
 
+/** Compose the caption for a delivered PDF (name + gap + description). */
+function buildPdfCaption(pdf) {
+  const name = (pdf.name || '').trim();
+  const desc = (pdf.description || '').trim();
+  if (name && desc) return `${name}\n\n${desc}`;
+  return name || desc || 'Resource';
+}
+
 const router = express.Router();
 
 /**
@@ -38,9 +46,17 @@ async function handleFlowCompletion(msg) {
         `${(pdf.name || 'document').replace(/[^\w\d-]+/g, '_').slice(0, 60)}.pdf`;
       await meta.sendDocument(phone, pdf.pdfUrl, {
         filename: fileName,
-        caption: pdf.name,
+        caption: buildPdfCaption(pdf),
       });
       console.log('[webhook] PDF sent', { to: phone, pdfId: payload.selected_pdf, name: pdf.name });
+
+      // Follow-up: re-send the welcome flow card so the user sees the
+      // "Choose Service" button and can navigate the menu again.
+      try {
+        await chatbot.sendWelcomeFlow(phone);
+      } catch (err) {
+        console.error('[webhook] follow-up welcome flow failed:', err.response?.data || err.message);
+      }
     } catch (err) {
       console.error('[webhook] PDF send failed:', err.response?.data || err.message);
       try {
