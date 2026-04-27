@@ -10,11 +10,12 @@ build/
 
 # ─── Environment & secrets ───────────────────────────
 .env
-.env.*
-!.env.example
+.env.local
+.env.development
 **/.env
-**/.env.*
-!**/.env.example
+**/.env.local
+**/.env.development
+# `.env.example` and `.env.production` (no secrets — public API URL only) are tracked
 
 # RSA / TLS keys, certificates
 *.pem

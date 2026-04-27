@@ -11,9 +11,11 @@ const path = require('path');
 
 const flowImages = require('../services/flowImages');
 const { urlToBase64 } = require('../services/imageBase64');
+const meta = require('../services/metaCloud');
 const User = require('../models/User');
 const Event = require('../models/Event');
 const Enquiry = require('../models/Enquiry');
+const Pdf = require('../models/Pdf');
 
 const router = express.Router();
 
@@ -107,6 +109,7 @@ async function loadImagesB64() {
     'icon_training_packages',
     'icon_events',
     'icon_enquiry',
+    'icon_pdfs',
     'icon_yoga_retreats',
     'icon_sound_healing',
     'icon_special_yoga_day',
@@ -196,7 +199,43 @@ async function buildServiceList(images, isRegistered) {
       images.icon_enquiry
     )
   );
+
+  // Append PDFs tile only when at least one active PDF is uploaded by admin.
+  const pdfCount = await Pdf.countDocuments({ active: true });
+  if (pdfCount > 0) {
+    list.push(
+      withImage(
+        { id: 'pdfs', title: 'PDF Resources', description: `${pdfCount} document${pdfCount > 1 ? 's' : ''} available` },
+        images.icon_pdfs
+      )
+    );
+  }
   return list;
+}
+
+/** Fetch active PDFs and shape them as RadioButton data-source items (id/title/description/image). */
+async function buildPdfsList() {
+  const pdfs = await Pdf.find({ active: true }).sort({ createdAt: -1 }).limit(20).lean();
+  return Promise.all(
+    pdfs.map(async (p) => {
+      const item = {
+        id: p._id.toString(),
+        title: (p.name || 'Resource').substring(0, 30),
+        description: (p.description || 'PDF document').substring(0, 60),
+      };
+      if (p.imageUrl) {
+        const b64 = await urlToBase64(p.imageUrl, {
+          width: 200,
+          height: 200,
+          crop: 'fill',
+          quality: 75,
+          format: 'jpg',
+        });
+        if (b64) item.image = b64;
+      }
+      return item;
+    })
+  );
 }
 
 function buildYogaPackages(images) {
@@ -439,6 +478,26 @@ async function handleDataExchange({ screen, data, flow_token }) {
         },
       };
     }
+    if (sel === 'pdfs') {
+      const pdfs = await buildPdfsList();
+      if (!pdfs.length) {
+        return {
+          screen: 'INFO',
+          data: {
+            info_title: 'No resources yet',
+            info_body: 'Our team will publish PDF resources here soon. Please check back later 🙏',
+          },
+        };
+      }
+      return {
+        screen: 'PDFS',
+        data: {
+          pdfs_banner: '',
+          has_pdfs_banner: false,
+          pdfs,
+        },
+      };
+    }
     // Unknown selection -> back to start
     return handleInit(flow_token);
   }
@@ -586,6 +645,54 @@ async function handleDataExchange({ screen, data, flow_token }) {
       data: {
         info_title: '🎉 Interest noted',
         info_body: 'Thanks! Our team will follow up with full event details on WhatsApp.',
+      },
+    };
+  }
+
+  // ─── PDFS — user picked a PDF, send it via WhatsApp ───
+  if (screen === 'PDFS') {
+    const pdfId = data.selected_pdf;
+    let pdf = null;
+    try {
+      pdf = await Pdf.findById(pdfId).lean();
+    } catch {
+      pdf = null;
+    }
+    if (!pdf || !pdf.pdfUrl) {
+      return {
+        screen: 'INFO',
+        data: { info_title: 'Resource unavailable', info_body: 'That resource could not be found. Please try again.' },
+      };
+    }
+    if (!phone) {
+      return {
+        screen: 'INFO',
+        data: { info_title: 'Cannot send', info_body: 'We could not detect your WhatsApp number. Please type *hi* to restart.' },
+      };
+    }
+    // Fire-and-await sending the PDF document.
+    try {
+      const fileName = `${pdf.name.replace(/[^\w\d-]+/g, '_').slice(0, 60) || 'document'}.pdf`;
+      await meta.sendDocument(phone, pdf.pdfUrl, {
+        filename: fileName,
+        caption: pdf.name,
+      });
+      dbg('PDF_SENT', { to: phone, pdfId: pdf._id.toString(), name: pdf.name });
+    } catch (err) {
+      dbg('PDF_SEND_FAIL', { message: err.response?.data || err.message });
+      return {
+        screen: 'INFO',
+        data: {
+          info_title: 'Failed to send',
+          info_body: 'We could not deliver the PDF right now. Please try again later.',
+        },
+      };
+    }
+    return {
+      screen: 'INFO',
+      data: {
+        info_title: '📄 PDF sent',
+        info_body: `We have sent *${pdf.name}* to your WhatsApp chat. Please check the messages.`,
       },
     };
   }

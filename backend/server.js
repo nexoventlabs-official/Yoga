@@ -14,6 +14,7 @@ const eventsRoutes = require('./routes/events');
 const enquiriesRoutes = require('./routes/enquiries');
 const flowImagesRoutes = require('./routes/flowImages');
 const dashboardRoutes = require('./routes/dashboard');
+const pdfsRoutes = require('./routes/pdfs');
 
 const app = express();
 
@@ -75,6 +76,7 @@ app.use('/api/events', eventsRoutes);
 app.use('/api/enquiries', enquiriesRoutes);
 app.use('/api/flow-images', flowImagesRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/pdfs', pdfsRoutes);
 
 // 404
 app.use((req, res) => res.status(404).json({ error: 'Not found', path: req.originalUrl }));

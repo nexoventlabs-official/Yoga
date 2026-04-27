@@ -38,6 +38,33 @@ async function sendText(to, text) {
   return data;
 }
 
+/**
+ * Send a document (PDF, etc.) by public URL.
+ * @param {string} to       recipient phone (E.164 digits)
+ * @param {string} docUrl   publicly accessible URL of the document
+ * @param {object} [opts]
+ * @param {string} [opts.filename] file name shown to the recipient (must include extension)
+ * @param {string} [opts.caption]  optional caption text
+ */
+async function sendDocument(to, docUrl, opts = {}) {
+  const { baseUrl, accessToken } = cfg();
+  const phone = String(to).replace(/\D/g, '');
+  const document = { link: docUrl };
+  if (opts.filename) document.filename = opts.filename;
+  if (opts.caption) document.caption = opts.caption;
+  const payload = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: phone,
+    type: 'document',
+    document,
+  };
+  const { data } = await api.post(`${baseUrl}/messages`, payload, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  return data;
+}
+
 /** Send a plain image message. */
 async function sendImage(to, imageUrl, caption = '') {
   const { baseUrl, accessToken } = cfg();
@@ -193,6 +220,7 @@ module.exports = {
   cfg,
   sendText,
   sendImage,
+  sendDocument,
   sendFlowMessage,
   createFlow,
   updateFlowJSON,

@@ -9,6 +9,7 @@ import NonRegisteredUsers from './pages/NonRegisteredUsers.jsx';
 import Events from './pages/Events.jsx';
 import Enquiries from './pages/Enquiries.jsx';
 import FlowImages from './pages/FlowImages.jsx';
+import Pdfs from './pages/Pdfs.jsx';
 
 function App() {
   const [auth, setAuth] = useState(null);
@@ -51,6 +52,7 @@ function App() {
           <Route path="non-registered" element={<NonRegisteredUsers />} />
           <Route path="events" element={<Events />} />
           <Route path="enquiries" element={<Enquiries />} />
+          <Route path="pdfs" element={<Pdfs />} />
           <Route path="flow-images" element={<FlowImages />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

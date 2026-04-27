@@ -15,6 +15,7 @@ const IMAGE_KEYS = [
   { key: 'icon_training_packages', label: 'Service icon: Training Packages', group: 'service_icons' },
   { key: 'icon_events', label: 'Service icon: Events', group: 'service_icons' },
   { key: 'icon_enquiry', label: 'Service icon: Enquiry', group: 'service_icons' },
+  { key: 'icon_pdfs', label: 'Service icon: PDFs / Resources', group: 'service_icons' },
 
   // Yoga Packages icons
   { key: 'icon_yoga_retreats', label: 'Yoga Packages icon: Yoga Retreats', group: 'yoga_packages' },

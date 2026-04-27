@@ -22,7 +22,7 @@ function buildFlowJSON() {
     data_api_version: '3.0',
     routing_model: {
       // INFO is the universal terminal screen — every other screen may transition to it
-      SERVICE_SELECT: ['REGISTER', 'PROFILE', 'YOGA_PACKAGES', 'TRAINING_PACKAGES', 'EVENTS', 'ENQUIRY', 'INFO'],
+      SERVICE_SELECT: ['REGISTER', 'PROFILE', 'YOGA_PACKAGES', 'TRAINING_PACKAGES', 'EVENTS', 'ENQUIRY', 'PDFS', 'INFO'],
       REGISTER: ['INFO'],
       PROFILE: ['INFO'],
       YOGA_PACKAGES: ['INFO'],
@@ -30,6 +30,7 @@ function buildFlowJSON() {
       EVENTS: ['EVENT_DETAILS', 'INFO'],
       EVENT_DETAILS: ['INFO'],
       ENQUIRY: ['INFO'],
+      PDFS: ['INFO'],
       INFO: [],
     },
     screens: [
@@ -443,6 +444,65 @@ function buildFlowJSON() {
                   name: '${form.name}',
                   mobile: '${data.init_phone}',
                   enquiry: '${form.enquiry}',
+                },
+              },
+            },
+          ],
+        },
+      },
+
+      // ─── PDFS (list of downloadable PDF resources) ───
+      {
+        id: 'PDFS',
+        title: 'Resources',
+        data: {
+          pdfs_banner: { type: 'string', __example__: 'iVBORw0KGgo' },
+          has_pdfs_banner: { type: 'boolean', __example__: false },
+          pdfs: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                title: { type: 'string' },
+                description: { type: 'string' },
+                image: { type: 'string' },
+              },
+            },
+            __example__: [
+              { id: 'pdf1', title: 'Yoga Beginner Guide', description: '15 page PDF' },
+            ],
+          },
+        },
+        layout: {
+          type: 'SingleColumnLayout',
+          children: [
+            {
+              type: 'Image',
+              src: '${data.pdfs_banner}',
+              width: 1000,
+              height: 125,
+              'scale-type': 'cover',
+              'alt-text': 'Resources',
+              visible: '${data.has_pdfs_banner}',
+            },
+            { type: 'TextSubheading', text: 'Pick a resource' },
+            { type: 'TextBody', text: 'We will send the selected PDF to you on WhatsApp.' },
+            {
+              type: 'RadioButtonsGroup',
+              name: 'selected_pdf',
+              label: 'Available PDFs',
+              required: true,
+              'data-source': '${data.pdfs}',
+            },
+            {
+              type: 'Footer',
+              label: 'Send PDF',
+              'on-click-action': {
+                name: 'data_exchange',
+                payload: {
+                  action: 'pdf_pick',
+                  selected_pdf: '${form.selected_pdf}',
                 },
               },
             },

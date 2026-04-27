@@ -6,6 +6,7 @@ import {
   Calendar,
   MessageSquare,
   Image as ImageIcon,
+  FileText,
   LogOut,
   Menu,
   X,
@@ -18,6 +19,7 @@ const NAV = [
   { to: '/non-registered', label: 'Non-Registered', icon: Users },
   { to: '/events', label: 'Events', icon: Calendar },
   { to: '/enquiries', label: 'Enquiries', icon: MessageSquare },
+  { to: '/pdfs', label: 'PDF Resources', icon: FileText },
   { to: '/flow-images', label: 'Flow Images', icon: ImageIcon },
 ];
 
