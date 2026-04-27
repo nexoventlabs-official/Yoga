@@ -19,6 +19,7 @@ export default function Pdfs() {
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [progress, setProgress] = useState(0);
 
   const load = async () => {
     setLoading(true);
@@ -65,6 +66,7 @@ export default function Pdfs() {
       return;
     }
     setSaving(true);
+    setProgress(0);
     try {
       const fd = new FormData();
       fd.append('name', form.name);
@@ -73,17 +75,25 @@ export default function Pdfs() {
       if (form.pdfFile) fd.append('pdf', form.pdfFile);
       if (form.imageFile) fd.append('image', form.imageFile);
 
+      const opts = {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (e) => {
+          if (e.total) setProgress(Math.round((e.loaded / e.total) * 100));
+        },
+      };
+
       if (editingId) {
-        await api.put(`/pdfs/${editingId}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+        await api.put(`/pdfs/${editingId}`, fd, opts);
       } else {
-        await api.post('/pdfs', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+        await api.post('/pdfs', fd, opts);
       }
       setShowForm(false);
       await load();
     } catch (err) {
-      alert(err.response?.data?.error || err.message);
+      alert(err.response?.data?.error || err.message || 'Upload failed');
     } finally {
       setSaving(false);
+      setProgress(0);
     }
   };
 
@@ -244,12 +254,39 @@ export default function Pdfs() {
               </label>
             </div>
 
+            {saving && progress > 0 && progress < 100 && (
+              <div className="px-5 pb-1">
+                <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-brand-500 transition-all"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Uploading… {progress}%</p>
+              </div>
+            )}
+            {saving && progress >= 100 && (
+              <div className="px-5 pb-1">
+                <p className="text-xs text-gray-500">Processing on server… (saving to Cloudinary)</p>
+              </div>
+            )}
             <div className="px-5 py-4 border-t border-gray-100 flex justify-end gap-2">
-              <button type="button" onClick={() => setShowForm(false)} className="btn-secondary">
+              <button
+                type="button"
+                onClick={() => setShowForm(false)}
+                className="btn-secondary"
+                disabled={saving}
+              >
                 Cancel
               </button>
               <button type="submit" className="btn-primary" disabled={saving}>
-                {saving ? 'Saving…' : editingId ? 'Update' : 'Upload'}
+                {saving
+                  ? progress < 100 && progress > 0
+                    ? `Uploading ${progress}%`
+                    : 'Saving…'
+                  : editingId
+                  ? 'Update'
+                  : 'Upload'}
               </button>
             </div>
           </form>

@@ -17,7 +17,7 @@ function bustFlowCache() {
 // Local multer that accepts both image (icon) and pdf in one multipart request.
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB max per file
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB max per file
   fileFilter: (_req, file, cb) => {
     if (file.fieldname === 'image') {
       if (!/^image\//.test(file.mimetype)) return cb(new Error('icon must be an image'));
