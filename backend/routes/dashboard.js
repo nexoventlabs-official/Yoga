@@ -4,6 +4,7 @@ const User = require('../models/User');
 const Event = require('../models/Event');
 const Enquiry = require('../models/Enquiry');
 const InboundMessage = require('../models/InboundMessage');
+const { resolveNames } = require('../services/displayName');
 
 const router = express.Router();
 
@@ -20,7 +21,8 @@ router.get('/stats', auth, async (_req, res) => {
     const nonRegistered = Math.max(totalContacts - registered, 0);
 
     const recentUsers = await User.find().sort({ createdAt: -1 }).limit(5).lean();
-    const recentEnquiries = await Enquiry.find().sort({ createdAt: -1 }).limit(5).lean();
+    const recentEnquiriesRaw = await Enquiry.find().sort({ createdAt: -1 }).limit(5).lean();
+    const recentEnquiries = await resolveNames(recentEnquiriesRaw);
 
     res.json({
       stats: {

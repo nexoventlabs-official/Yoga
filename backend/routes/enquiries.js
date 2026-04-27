@@ -1,6 +1,7 @@
 const express = require('express');
 const auth = require('../middleware/auth');
 const Enquiry = require('../models/Enquiry');
+const { resolveNames } = require('../services/displayName');
 
 const router = express.Router();
 
@@ -8,7 +9,8 @@ router.get('/', auth, async (req, res) => {
   const { status } = req.query;
   const filter = status ? { status } : {};
   const items = await Enquiry.find(filter).sort({ createdAt: -1 }).lean();
-  res.json({ enquiries: items });
+  const enquiries = await resolveNames(items);
+  res.json({ enquiries });
 });
 
 router.patch('/:id', auth, async (req, res) => {
