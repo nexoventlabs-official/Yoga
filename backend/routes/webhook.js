@@ -1,8 +1,57 @@
 const express = require('express');
 const crypto = require('crypto');
 const chatbot = require('../services/chatbot');
+const meta = require('../services/metaCloud');
+const Pdf = require('../models/Pdf');
 
 const router = express.Router();
+
+/**
+ * Handle a Flow `complete` callback (interactive.nfm_reply).
+ * Extracts the JSON form payload and dispatches the matching follow-up
+ * message (currently: sending a chosen PDF as a WhatsApp document).
+ *
+ * Returns true if the message was handled here and should NOT be forwarded
+ * to the regular chatbot.handleInbound() pipeline.
+ */
+async function handleFlowCompletion(msg) {
+  const nfm = msg.interactive?.nfm_reply;
+  if (!nfm || !nfm.response_json) return false;
+
+  let payload = {};
+  try {
+    payload = JSON.parse(nfm.response_json) || {};
+  } catch {
+    return false;
+  }
+
+  // PDF pick → send the selected PDF as a document.
+  if (payload.kind === 'pdf_pick' && payload.selected_pdf) {
+    const phone = String(msg.from || '').replace(/\D/g, '');
+    try {
+      const pdf = await Pdf.findById(payload.selected_pdf).lean();
+      if (!pdf || !pdf.pdfUrl) {
+        await meta.sendText(phone, 'Sorry, that resource is no longer available.');
+        return true;
+      }
+      const fileName =
+        `${(pdf.name || 'document').replace(/[^\w\d-]+/g, '_').slice(0, 60)}.pdf`;
+      await meta.sendDocument(phone, pdf.pdfUrl, {
+        filename: fileName,
+        caption: pdf.name,
+      });
+      console.log('[webhook] PDF sent', { to: phone, pdfId: payload.selected_pdf, name: pdf.name });
+    } catch (err) {
+      console.error('[webhook] PDF send failed:', err.response?.data || err.message);
+      try {
+        await meta.sendText(phone, 'We could not deliver the PDF right now. Please try again later.');
+      } catch {}
+    }
+    return true;
+  }
+
+  return false;
+}
 
 /* ─── Webhook verification (Meta GET) ─── */
 router.get('/meta', (req, res) => {
@@ -66,8 +115,12 @@ router.post('/meta', async (req, res) => {
 
           if (msg.type === 'text') text = msg.text?.body || '';
           else if (msg.type === 'interactive') {
-            // The flow response also comes as interactive — the flow endpoint
-            // already handled the data exchange so we just ignore here.
+            // Flow `complete` callbacks arrive as interactive.nfm_reply — handle
+            // them here (e.g. PDF delivery) and skip the regular chatbot flow.
+            if (msg.interactive?.type === 'nfm_reply') {
+              const handled = await handleFlowCompletion(msg);
+              if (handled) continue;
+            }
             text = msg.interactive?.button_reply?.title ||
               msg.interactive?.list_reply?.title || '';
           } else if (msg.type === 'button') {

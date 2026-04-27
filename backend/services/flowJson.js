@@ -30,7 +30,7 @@ function buildFlowJSON() {
       EVENTS: ['EVENT_DETAILS', 'INFO'],
       EVENT_DETAILS: ['INFO'],
       ENQUIRY: ['INFO'],
-      PDFS: ['INFO'],
+      PDFS: [],
       INFO: [],
     },
     screens: [
@@ -452,9 +452,14 @@ function buildFlowJSON() {
       },
 
       // ─── PDFS (list of downloadable PDF resources) ───
+      // Terminal screen: tapping "Send PDF" fires the `complete` action
+      // which closes the flow and sends an nfm_reply to our webhook.
+      // The webhook then dispatches the chosen PDF as a WhatsApp document.
       {
         id: 'PDFS',
         title: 'Resources',
+        terminal: true,
+        success: true,
         data: {
           pdfs_banner: { type: 'string', __example__: 'iVBORw0KGgo' },
           has_pdfs_banner: { type: 'boolean', __example__: false },
@@ -487,7 +492,7 @@ function buildFlowJSON() {
               visible: '${data.has_pdfs_banner}',
             },
             { type: 'TextSubheading', text: 'Pick a resource' },
-            { type: 'TextBody', text: 'We will send the selected PDF to you on WhatsApp.' },
+            { type: 'TextBody', text: 'We will send the selected PDF to your WhatsApp chat.' },
             {
               type: 'RadioButtonsGroup',
               name: 'selected_pdf',
@@ -499,9 +504,9 @@ function buildFlowJSON() {
               type: 'Footer',
               label: 'Send PDF',
               'on-click-action': {
-                name: 'data_exchange',
+                name: 'complete',
                 payload: {
-                  action: 'pdf_pick',
+                  kind: 'pdf_pick',
                   selected_pdf: '${form.selected_pdf}',
                 },
               },

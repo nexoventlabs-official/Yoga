@@ -649,53 +649,8 @@ async function handleDataExchange({ screen, data, flow_token }) {
     };
   }
 
-  // ─── PDFS — user picked a PDF, send it via WhatsApp ───
-  if (screen === 'PDFS') {
-    const pdfId = data.selected_pdf;
-    let pdf = null;
-    try {
-      pdf = await Pdf.findById(pdfId).lean();
-    } catch {
-      pdf = null;
-    }
-    if (!pdf || !pdf.pdfUrl) {
-      return {
-        screen: 'INFO',
-        data: { info_title: 'Resource unavailable', info_body: 'That resource could not be found. Please try again.' },
-      };
-    }
-    if (!phone) {
-      return {
-        screen: 'INFO',
-        data: { info_title: 'Cannot send', info_body: 'We could not detect your WhatsApp number. Please type *hi* to restart.' },
-      };
-    }
-    // Fire-and-await sending the PDF document.
-    try {
-      const fileName = `${pdf.name.replace(/[^\w\d-]+/g, '_').slice(0, 60) || 'document'}.pdf`;
-      await meta.sendDocument(phone, pdf.pdfUrl, {
-        filename: fileName,
-        caption: pdf.name,
-      });
-      dbg('PDF_SENT', { to: phone, pdfId: pdf._id.toString(), name: pdf.name });
-    } catch (err) {
-      dbg('PDF_SEND_FAIL', { message: err.response?.data || err.message });
-      return {
-        screen: 'INFO',
-        data: {
-          info_title: 'Failed to send',
-          info_body: 'We could not deliver the PDF right now. Please try again later.',
-        },
-      };
-    }
-    return {
-      screen: 'INFO',
-      data: {
-        info_title: '📄 PDF sent',
-        info_body: `We have sent *${pdf.name}* to your WhatsApp chat. Please check the messages.`,
-      },
-    };
-  }
+  // Note: the PDFS screen uses the `complete` action (terminal), so it never
+  // arrives here as data_exchange. The webhook handles delivery instead.
 
   // ─── ENQUIRY submitted ───
   if (screen === 'ENQUIRY') {
