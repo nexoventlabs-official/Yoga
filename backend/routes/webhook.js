@@ -4,12 +4,13 @@ const chatbot = require('../services/chatbot');
 const meta = require('../services/metaCloud');
 const Pdf = require('../models/Pdf');
 
-/** Compose the caption for a delivered PDF (name + gap + description). */
-function buildPdfCaption(pdf) {
+/** Compose the body text for a delivered PDF (bold name + gap + description). */
+function buildPdfBody(pdf) {
   const name = (pdf.name || '').trim();
   const desc = (pdf.description || '').trim();
-  if (name && desc) return `${name}\n\n${desc}`;
-  return name || desc || 'Resource';
+  if (name && desc) return `*${name}*\n\n${desc}`;
+  if (name) return `*${name}*`;
+  return desc || 'Resource';
 }
 
 const router = express.Router();
@@ -44,19 +45,34 @@ async function handleFlowCompletion(msg) {
       }
       const fileName =
         `${(pdf.name || 'document').replace(/[^\w\d-]+/g, '_').slice(0, 60)}.pdf`;
-      await meta.sendDocument(phone, pdf.pdfUrl, {
-        filename: fileName,
-        caption: buildPdfCaption(pdf),
-      });
-      console.log('[webhook] PDF sent', { to: phone, pdfId: payload.selected_pdf, name: pdf.name });
 
-      // Follow-up: re-send the welcome flow card so the user sees the
-      // "Choose Service" button and can navigate the menu again.
-      try {
-        await chatbot.sendWelcomeFlow(phone);
-      } catch (err) {
-        console.error('[webhook] follow-up welcome flow failed:', err.response?.data || err.message);
+      const flowId = process.env.WHATSAPP_FLOW_ID;
+      const mode =
+        String(process.env.WHATSAPP_FLOW_STATUS || '').toUpperCase() === 'PUBLISHED'
+          ? 'published'
+          : 'draft';
+
+      if (flowId) {
+        // Single interactive message: document header (PDF) + bold name +
+        // description + "Choose Service" CTA that re-opens the flow.
+        await meta.sendFlowMessage(phone, {
+          flowId,
+          flowCta: 'Choose Service',
+          headerDocumentUrl: pdf.pdfUrl,
+          headerDocumentFilename: fileName,
+          bodyText: buildPdfBody(pdf),
+          footerText: 'Himalayan Yoga Academy',
+          flowToken: `welcome_${phone}`,
+          mode,
+        });
+      } else {
+        // Fallback if flow id is missing — at least deliver the PDF.
+        await meta.sendDocument(phone, pdf.pdfUrl, {
+          filename: fileName,
+          caption: buildPdfBody(pdf),
+        });
       }
+      console.log('[webhook] PDF sent', { to: phone, pdfId: payload.selected_pdf, name: pdf.name });
     } catch (err) {
       console.error('[webhook] PDF send failed:', err.response?.data || err.message);
       try {

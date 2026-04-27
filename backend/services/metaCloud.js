@@ -90,6 +90,8 @@ async function sendImage(to, imageUrl, caption = '') {
  * @param {string} options.flowId
  * @param {string} options.flowCta
  * @param {string} [options.headerImageUrl]
+ * @param {string} [options.headerDocumentUrl]      Public URL of a PDF/document to use as header
+ * @param {string} [options.headerDocumentFilename] Display filename for the document header
  * @param {string} [options.headerText]
  * @param {string} options.bodyText
  * @param {string} [options.footerText]
@@ -104,6 +106,8 @@ async function sendFlowMessage(to, options) {
     flowId,
     flowCta,
     headerImageUrl,
+    headerDocumentUrl,
+    headerDocumentFilename,
     headerText,
     bodyText,
     footerText,
@@ -111,9 +115,16 @@ async function sendFlowMessage(to, options) {
     mode = 'published',
   } = options;
 
-  const header = headerImageUrl
-    ? { type: 'image', image: { link: headerImageUrl } }
-    : { type: 'text', text: headerText || 'Himalayan Yoga' };
+  let header;
+  if (headerDocumentUrl) {
+    const doc = { link: headerDocumentUrl };
+    if (headerDocumentFilename) doc.filename = headerDocumentFilename;
+    header = { type: 'document', document: doc };
+  } else if (headerImageUrl) {
+    header = { type: 'image', image: { link: headerImageUrl } };
+  } else {
+    header = { type: 'text', text: headerText || 'Himalayan Yoga' };
+  }
 
   const payload = {
     messaging_product: 'whatsapp',
