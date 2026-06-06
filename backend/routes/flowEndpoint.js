@@ -492,9 +492,8 @@ async function handleDataExchange({ screen, data, flow_token }) {
   }
 
   /* ── TTC program picked → show batches ── */
-  if (screen === 'TTC_PROGRAM_SELECT' && data?.action === 'ttc_program_pick') {
-    const programId = data.selected_program;
-    const program = programId ? await Program.findById(programId).lean() : null;
+  if (screen === 'TTC_PROGRAM_SELECT') {
+    const programId = data?.selected_program;
     const batches = await buildBatchItems(programId, 'ttc');
     if (!batches.length) {
       return { screen: 'INFO', data: { info_title: 'No batches available', info_body: 'No batches are scheduled for this program right now. Please check back soon or send an Enquiry 🙏' } };
@@ -509,25 +508,11 @@ async function handleDataExchange({ screen, data, flow_token }) {
     };
   }
 
-  /* ── TTC batch picked ── */
-  if (screen === 'TTC_COURSE_SELECT' && data?.action === 'ttc_batch_pick') {
-    const batchId = data.selected_batch;
-    const batch = batchId ? await Batch.findById(batchId).lean() : null;
-    const program = batch ? await Program.findById(batch.programId).lean() : null;
-    const dateStr = batch ? `${formatDate(batch.startDate)} – ${formatDate(batch.endDate)}` : '';
-    const confirmText = program ? `${program.name}${dateStr ? ' · ' + dateStr : ''}` : 'Course selected';
-    return {
-      screen: 'TTC_CONFIRM',
-      data: {
-        confirm_text: confirmText,
-        selected_batch: batchId || '',
-      },
-    };
-  }
+  /* ── TTC batch picked — handled via nfm_reply in webhook (terminal screen) ── */
 
   /* ── Practice program picked → show sessions ── */
-  if (screen === 'PRACTICE_PROGRAM_SELECT' && data?.action === 'practice_program_pick') {
-    const programId = data.selected_program;
+  if (screen === 'PRACTICE_PROGRAM_SELECT') {
+    const programId = data?.selected_program;
     const program = programId ? await Program.findById(programId).lean() : null;
     const sessions = await buildBatchItems(programId, 'practice');
     if (!sessions.length) {
@@ -543,8 +528,8 @@ async function handleDataExchange({ screen, data, flow_token }) {
   }
 
   /* ── Practice session picked ── */
-  if (screen === 'PRACTICE_SESSION_SELECT' && data?.action === 'practice_session_pick') {
-    const batchId = data.selected_session;
+  if (screen === 'PRACTICE_SESSION_SELECT') {
+    const batchId = data?.selected_session;
     const batch = batchId ? await Batch.findById(batchId).lean() : null;
     const program = batch ? await Program.findById(batch.programId).lean() : null;
     const confirmText = program
@@ -561,8 +546,8 @@ async function handleDataExchange({ screen, data, flow_token }) {
   }
 
   /* ── Retreat program picked → show dates ── */
-  if (screen === 'RETREAT_PROGRAM_SELECT' && data?.action === 'retreat_program_pick') {
-    const programId = data.selected_program;
+  if (screen === 'RETREAT_PROGRAM_SELECT') {
+    const programId = data?.selected_program;
     const program = programId ? await Program.findById(programId).lean() : null;
     const dates = await buildBatchItems(programId, 'retreat');
     if (!dates.length) {
@@ -578,8 +563,8 @@ async function handleDataExchange({ screen, data, flow_token }) {
   }
 
   /* ── Retreat date picked ── */
-  if (screen === 'RETREAT_DATE_SELECT' && data?.action === 'retreat_date_pick') {
-    const batchId = data.selected_date;
+  if (screen === 'RETREAT_DATE_SELECT') {
+    const batchId = data?.selected_date;
     const batch = batchId ? await Batch.findById(batchId).lean() : null;
     const program = batch ? await Program.findById(batch.programId).lean() : null;
     const dateStr = batch ? `${formatDate(batch.startDate)} – ${formatDate(batch.endDate)}` : '';
