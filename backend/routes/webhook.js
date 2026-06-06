@@ -123,6 +123,7 @@ async function handleProgramConfirm(phone, batchId, programType) {
           paymentStatus: 'pending', currentFlow: 'w1', intent: program.type,
           courseStartDate: batch.startDate, courseEndDate: batch.endDate,
         },
+        $setOnInsert: { bookingRef: null },
       },
       { upsert: true, new: true }
     );

@@ -28,7 +28,7 @@ const BookingSchema = new mongoose.Schema(
     metaReferenceId: { type: String, default: '', index: true }, // BOOKING-<_id> used for payment callbacks
     metaPaymentStatus: { type: String, default: '' }, // raw status from Meta: captured/failed/pending
     paymentTxnId: { type: String, default: '' },     // Razorpay transaction id
-    bookingRef: { type: String, default: '', unique: true, sparse: true }, // HYA-2026-XXXX
+    bookingRef: { type: String, default: null, unique: true, sparse: true }, // HYA-2026-XXXX
     receiptPdfUrl: { type: String, default: '' },
     // Journey state
     currentFlow: {
