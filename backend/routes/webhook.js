@@ -184,19 +184,20 @@ async function handleReplyButton(phone, buttonId) {
       await meta.sendOrderDetails(phone, {
         referenceId,
         configurationName: configName,
-        headerText: 'Himalayan Yoga Academy 🧘',
+        headerText: 'Himalayan Yoga Academy',
         bodyText:
           `*${booking.programName}*${booking.batchName ? ' — ' + booking.batchName : ''}\n\n` +
           `Complete your payment to confirm your enrollment. Your spot will be reserved once payment is received 🙏`,
-        footerText: 'Secure payment via WhatsApp Pay',
+        footerText: 'Himalayan Yoga Academy',
         expirationTimestamp: expiresAt,
+        expirationDesc: 'Offer expires in 24 hours',
         items: [{
-          retailerId: booking.batchId?.toString() || booking.programId?.toString() || 'course',
-          name: `${booking.programName}${booking.batchName ? ' — ' + booking.batchName : ''}`,
+          name: `${booking.programName}${booking.batchName ? ' - ' + booking.batchName : ''}`.substring(0, 60),
           amount,
           quantity: 1,
         }],
         subtotal: amount,
+        tax: 0,
       });
 
       console.log(`[webhook] Native payment request sent to ${phone} for ${booking.programName}`);

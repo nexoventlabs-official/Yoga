@@ -229,20 +229,23 @@ async function uploadBusinessPublicKey(publicKeyPem) {
 
 /**
  * Native WhatsApp Pay — Order Details message (student → academy course fee).
- * https://developers.facebook.com/docs/whatsapp/cloud-api/messages/order-details-messages
+ * https://developers.facebook.com/docs/whatsapp/cloud-api/payments-api/payments-in/upi-intent
  *
- * Currency amounts: { value: rupees * offset, offset }  (INR: offset=100)
+ * UPI VPA config: payment_type = "upi", payment_configuration = config name.
+ * Currency amounts: { value: Math.round(rupees * offset), offset }  INR offset=100
  *
  * @param {string} to
  * @param {object} opts
- * @param {string}   opts.referenceId          Unique order ref e.g. BOOKING-<id>
- * @param {string}   opts.configurationName    Meta payment configuration name
- * @param {string}   [opts.headerText]         Header text (shown above body)
- * @param {string}   opts.bodyText
- * @param {string}   [opts.footerText]
- * @param {number}   [opts.expirationTimestamp] epoch seconds
- * @param {Array<{retailerId,name,amount,quantity,saleAmount?}>} opts.items
- * @param {number}   opts.subtotal             in rupees
+ * @param {string}   opts.referenceId           Unique order ref ≤35 chars, [A-Za-z0-9_\-.]
+ * @param {string}   opts.configurationName     Meta payment configuration name
+ * @param {string}   [opts.headerText]          Optional header text
+ * @param {string}   opts.bodyText              Body text (max 1024 chars)
+ * @param {string}   [opts.footerText]          Footer text (max 60 chars)
+ * @param {number}   [opts.expirationTimestamp] epoch seconds (min now+300)
+ * @param {string}   [opts.expirationDesc]      Expiration description (max 120 chars)
+ * @param {Array<{name,amount,quantity}>} opts.items  items list
+ * @param {number}   opts.subtotal              subtotal in rupees
+ * @param {number}   [opts.tax=0]               tax in rupees
  * @param {string}   [opts.currency='INR']
  * @param {number}   [opts.offset=100]
  */
@@ -257,8 +260,10 @@ async function sendOrderDetails(to, opts) {
     bodyText,
     footerText,
     expirationTimestamp,
+    expirationDesc,
     items,
     subtotal,
+    tax = 0,
     currency = 'INR',
     offset = 100,
   } = opts;
@@ -269,68 +274,60 @@ async function sendOrderDetails(to, opts) {
 
   const toMoney = (amt) => ({ value: Math.round(Number(amt || 0) * offset), offset });
 
-  const totalValue = items.reduce((s, it) => {
-    const each = toMoney(it.saleAmount ?? it.amount).value;
-    return s + each * (it.quantity || 1);
-  }, 0);
-  const totalAmount = { value: totalValue, offset };
+  const totalValue = toMoney(subtotal).value + toMoney(tax).value;
 
-  const orderItems = items.map((it) => {
-    const o = {
-      retailer_id: String(it.retailerId),
-      name: String(it.name).substring(0, 60),
-      amount: toMoney(it.amount),
-      quantity: it.quantity || 1,
-    };
-    if (it.saleAmount !== undefined) o.sale_amount = toMoney(it.saleAmount);
-    return o;
-  });
+  const orderItems = items.map((it) => ({
+    name: String(it.name).substring(0, 60),
+    amount: toMoney(it.amount),
+    quantity: it.quantity || 1,
+  }));
 
-  const paymentSetting = {
-    type: 'payment_gateway',
-    payment_gateway: {
-      type: 'upi',
-      configuration_name: configurationName,
-    },
-  };
-
-  const action = {
-    name: 'review_and_pay',
-    parameters: {
-      reference_id: String(referenceId),
-      type: 'digital-goods',
-      currency,
-      total_amount: totalAmount,
-      order: {
-        status: 'pending',
-        items: orderItems,
-        subtotal: toMoney(subtotal),
-      },
-      payment_settings: [paymentSetting],
-    },
+  const order = {
+    status: 'pending',
+    items: orderItems,
+    subtotal: toMoney(subtotal),
+    tax: toMoney(tax),
   };
 
   if (expirationTimestamp) {
-    action.parameters.expiration = {
+    order.expiration = {
       timestamp: String(expirationTimestamp),
-      description: 'Payment link expires',
+      description: (expirationDesc || 'Payment link expires').substring(0, 120),
     };
   }
 
   const interactive = {
     type: 'order_details',
     body: { text: bodyText },
-    action,
+    action: {
+      name: 'review_and_pay',
+      parameters: {
+        reference_id: String(referenceId).substring(0, 35),
+        type: 'digital-goods',
+        payment_type: 'upi',
+        payment_configuration: configurationName,
+        currency,
+        total_amount: { value: totalValue, offset },
+        order,
+      },
+    },
   };
-  if (headerText) interactive.header = { type: 'text', text: headerText };
-  if (footerText) interactive.footer = { text: footerText };
 
-  const { data } = await api.post(
-    `${baseUrl}/messages`,
-    { messaging_product: 'whatsapp', recipient_type: 'individual', to: phone, type: 'interactive', interactive },
-    { headers: { Authorization: `Bearer ${accessToken}` } }
-  );
-  return data;
+  if (headerText) interactive.header = { type: 'text', text: String(headerText).substring(0, 60) };
+  if (footerText) interactive.footer = { text: String(footerText).substring(0, 60) };
+
+  try {
+    const { data } = await api.post(
+      `${baseUrl}/messages`,
+      { messaging_product: 'whatsapp', recipient_type: 'individual', to: phone, type: 'interactive', interactive },
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    return data;
+  } catch (err) {
+    // Log full Meta error so we can debug
+    console.error('[metaCloud] sendOrderDetails failed:', JSON.stringify(err.response?.data || err.message));
+    throw err;
+  }
 }
 
 /**
