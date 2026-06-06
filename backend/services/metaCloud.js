@@ -227,12 +227,52 @@ async function uploadBusinessPublicKey(publicKeyPem) {
   return data;
 }
 
+/**
+ * Send interactive reply buttons (up to 3 buttons).
+ * @param {string} to
+ * @param {object} opts
+ * @param {string} opts.bodyText
+ * @param {Array<{id: string, title: string}>} opts.buttons
+ * @param {string} [opts.headerText]
+ * @param {string} [opts.footerText]
+ */
+async function sendReplyButtons(to, opts) {
+  const { baseUrl, accessToken } = cfg();
+  const phone = String(to).replace(/\D/g, '');
+  const { bodyText, buttons, headerText, footerText } = opts;
+
+  const payload = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: phone,
+    type: 'interactive',
+    interactive: {
+      type: 'button',
+      body: { text: bodyText },
+      action: {
+        buttons: buttons.slice(0, 3).map((b) => ({
+          type: 'reply',
+          reply: { id: b.id.substring(0, 256), title: b.title.substring(0, 20) },
+        })),
+      },
+    },
+  };
+  if (headerText) payload.interactive.header = { type: 'text', text: headerText };
+  if (footerText) payload.interactive.footer = { text: footerText };
+
+  const { data } = await api.post(`${baseUrl}/messages`, payload, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  return data;
+}
+
 module.exports = {
   cfg,
   sendText,
   sendImage,
   sendDocument,
   sendFlowMessage,
+  sendReplyButtons,
   createFlow,
   updateFlowJSON,
   publishFlow,

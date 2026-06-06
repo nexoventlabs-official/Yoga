@@ -9,14 +9,31 @@ import {
   FileText,
   LogOut,
   Menu,
-  X,
+  BookOpen,
+  Layers,
+  CreditCard,
+  Radio,
+  Tag,
+  HelpCircle,
+  Activity,
 } from 'lucide-react';
 import { useState } from 'react';
 
 const NAV = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
+  { label: 'Programs', divider: true },
+  { to: '/programs', label: 'Programs', icon: BookOpen },
+  { to: '/batches', label: 'Batches & Sessions', icon: Layers },
+  { to: '/bookings', label: 'Bookings', icon: CreditCard },
+  { to: '/sequences', label: 'Nurture Sequences', icon: Activity },
+  { label: 'Campaigns', divider: true },
+  { to: '/broadcasts', label: 'Broadcasts (W6)', icon: Radio },
+  { to: '/offers', label: 'Payment Offers', icon: Tag },
+  { to: '/faqs', label: 'FAQ Content', icon: HelpCircle },
+  { label: 'Users', divider: true },
   { to: '/registered', label: 'Registered Users', icon: UserCheck },
   { to: '/non-registered', label: 'Non-Registered', icon: Users },
+  { label: 'Content', divider: true },
   { to: '/events', label: 'Events', icon: Calendar },
   { to: '/enquiries', label: 'Enquiries', icon: MessageSquare },
   { to: '/pdfs', label: 'PDF Resources', icon: FileText },
@@ -35,7 +52,6 @@ export default function Layout({ user, setAuth }) {
 
   return (
     <div className="min-h-screen flex">
-      {/* Sidebar */}
       <aside
         className={`fixed lg:static inset-y-0 left-0 z-30 w-64 bg-brand-900 text-white flex flex-col transition-transform ${
           open ? 'translate-x-0' : '-translate-x-full'
@@ -51,30 +67,44 @@ export default function Layout({ user, setAuth }) {
           </div>
         </div>
 
-        <nav className="flex-1 py-4 space-y-1 px-3 overflow-y-auto">
-          {NAV.map(({ to, label, icon: Icon, end }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={end}
-              onClick={() => setOpen(false)}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition ${
-                  isActive
-                    ? 'bg-brand-700 text-white font-medium'
-                    : 'text-brand-100 hover:bg-brand-800 hover:text-white'
-                }`
-              }
-            >
-              <Icon size={18} />
-              {label}
-            </NavLink>
-          ))}
+        <nav className="flex-1 py-4 space-y-0.5 px-3 overflow-y-auto">
+          {NAV.map((item, i) => {
+            if (item.divider) {
+              return (
+                <div
+                  key={`div-${i}`}
+                  className="px-3 pt-4 pb-1 text-xs font-semibold text-brand-400 uppercase tracking-wider"
+                >
+                  {item.label}
+                </div>
+              );
+            }
+            const Icon = item.icon;
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                onClick={() => setOpen(false)}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition ${
+                    isActive
+                      ? 'bg-brand-700 text-white font-medium'
+                      : 'text-brand-100 hover:bg-brand-800 hover:text-white'
+                  }`
+                }
+              >
+                <Icon size={16} />
+                {item.label}
+              </NavLink>
+            );
+          })}
         </nav>
 
         <div className="p-3 border-t border-brand-800">
           <div className="px-3 py-2 mb-2 text-xs text-brand-200">
-            Signed in as <span className="text-white font-medium">{user?.username}</span>
+            Signed in as{' '}
+            <span className="text-white font-medium">{user?.username}</span>
           </div>
           <button
             onClick={logout}
@@ -85,7 +115,6 @@ export default function Layout({ user, setAuth }) {
         </div>
       </aside>
 
-      {/* Mobile overlay */}
       {open && (
         <div
           onClick={() => setOpen(false)}
@@ -93,13 +122,14 @@ export default function Layout({ user, setAuth }) {
         />
       )}
 
-      {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
         <header className="bg-white border-b border-gray-200 px-4 lg:px-6 py-3 flex items-center justify-between sticky top-0 z-10">
           <button onClick={() => setOpen(true)} className="lg:hidden p-2 -ml-2">
             <Menu size={22} />
           </button>
-          <div className="font-semibold text-brand-800 truncate">Himalayan Yoga Academy</div>
+          <div className="font-semibold text-brand-800 truncate">
+            Himalayan Yoga Academy
+          </div>
           <div className="w-8" />
         </header>
 

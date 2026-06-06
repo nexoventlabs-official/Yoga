@@ -8,30 +8,22 @@ const IMAGE_KEYS = [
   // Welcome banner
   { key: 'flow_welcome_banner', label: 'Welcome Flow Banner (top of service screen)', group: 'banners' },
 
-  // Service-screen icons
+  // Service-screen icons — new intent icons
+  { key: 'icon_ttc', label: 'Service icon: Become a Teacher (TTC)', group: 'service_icons' },
+  { key: 'icon_practice', label: 'Service icon: Deepen Practice', group: 'service_icons' },
+  { key: 'icon_retreat', label: 'Service icon: Retreat / Short Program', group: 'service_icons' },
   { key: 'icon_register', label: 'Service icon: Register', group: 'service_icons' },
   { key: 'icon_profile', label: 'Service icon: Profile (registered users)', group: 'service_icons' },
-  { key: 'icon_yoga_packages', label: 'Service icon: Yoga Packages', group: 'service_icons' },
-  { key: 'icon_training_packages', label: 'Service icon: Training Packages', group: 'service_icons' },
   { key: 'icon_events', label: 'Service icon: Events', group: 'service_icons' },
   { key: 'icon_enquiry', label: 'Service icon: Enquiry', group: 'service_icons' },
   { key: 'icon_pdfs', label: 'Service icon: PDFs / Resources', group: 'service_icons' },
 
-  // Yoga Packages icons
-  { key: 'icon_yoga_retreats', label: 'Yoga Packages icon: Yoga Retreats', group: 'yoga_packages' },
-  { key: 'icon_sound_healing', label: 'Yoga Packages icon: Sound Healing', group: 'yoga_packages' },
-  { key: 'icon_special_yoga_day', label: 'Yoga Packages icon: Special Yoga Day Package', group: 'yoga_packages' },
-
-  // Training Packages icons
-  { key: 'icon_meditation_training', label: 'Training icon: Meditation Training', group: 'training_packages' },
-  { key: 'icon_sound_healing_training', label: 'Training icon: Sound Healing', group: 'training_packages' },
-  { key: 'icon_yoga_training', label: 'Training icon: Yoga Training', group: 'training_packages' },
-
-  // Sub-screen banners (optional)
+  // Sub-screen banners
+  { key: 'banner_ttc', label: 'Banner — Become a Teacher (TTC) screen', group: 'sub_banners' },
+  { key: 'banner_practice', label: 'Banner — Deepen Practice screen', group: 'sub_banners' },
+  { key: 'banner_retreat', label: 'Banner — Retreat / Short Program screen', group: 'sub_banners' },
   { key: 'banner_register', label: 'Banner — Register screen', group: 'sub_banners' },
   { key: 'banner_profile', label: 'Banner — Profile screen', group: 'sub_banners' },
-  { key: 'banner_yoga_packages', label: 'Banner — Yoga Packages screen', group: 'sub_banners' },
-  { key: 'banner_training_packages', label: 'Banner — Training Packages screen', group: 'sub_banners' },
   { key: 'banner_events', label: 'Banner — Events screen', group: 'sub_banners' },
   { key: 'banner_enquiry', label: 'Banner — Enquiry screen', group: 'sub_banners' },
 

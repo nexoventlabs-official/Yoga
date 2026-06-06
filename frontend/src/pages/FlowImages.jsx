@@ -4,9 +4,7 @@ import api from '../api';
 
 const GROUP_LABELS = {
   banners: 'Welcome Flow Banner',
-  service_icons: 'Service Selection Icons',
-  yoga_packages: 'Yoga Packages Icons',
-  training_packages: 'Training Packages Icons',
+  service_icons: 'Service Selection Icons (TTC / Practice / Retreat / etc.)',
   sub_banners: 'Sub-Screen Banners',
   chatbot: 'Chatbot Welcome Image',
 };

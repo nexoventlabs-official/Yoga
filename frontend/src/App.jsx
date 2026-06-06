@@ -10,6 +10,13 @@ import Events from './pages/Events.jsx';
 import Enquiries from './pages/Enquiries.jsx';
 import FlowImages from './pages/FlowImages.jsx';
 import Pdfs from './pages/Pdfs.jsx';
+import Programs from './pages/Programs.jsx';
+import Batches from './pages/Batches.jsx';
+import Bookings from './pages/Bookings.jsx';
+import Sequences from './pages/Sequences.jsx';
+import Broadcasts from './pages/Broadcasts.jsx';
+import Offers from './pages/Offers.jsx';
+import FAQs from './pages/FAQs.jsx';
 
 function App() {
   const [auth, setAuth] = useState(null);
@@ -17,12 +24,8 @@ function App() {
 
   useEffect(() => {
     const token = localStorage.getItem('hy_token');
-    if (!token) {
-      setLoading(false);
-      return;
-    }
-    api
-      .get('/auth/verify')
+    if (!token) { setLoading(false); return; }
+    api.get('/auth/verify')
       .then((r) => setAuth(r.data.user))
       .catch(() => localStorage.removeItem('hy_token'))
       .finally(() => setLoading(false));
@@ -39,14 +42,8 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route
-          path="/login"
-          element={auth ? <Navigate to="/" replace /> : <Login setAuth={setAuth} />}
-        />
-        <Route
-          path="/"
-          element={auth ? <Layout user={auth} setAuth={setAuth} /> : <Navigate to="/login" replace />}
-        >
+        <Route path="/login" element={auth ? <Navigate to="/" replace /> : <Login setAuth={setAuth} />} />
+        <Route path="/" element={auth ? <Layout user={auth} setAuth={setAuth} /> : <Navigate to="/login" replace />}>
           <Route index element={<Dashboard />} />
           <Route path="registered" element={<RegisteredUsers />} />
           <Route path="non-registered" element={<NonRegisteredUsers />} />
@@ -54,6 +51,13 @@ function App() {
           <Route path="enquiries" element={<Enquiries />} />
           <Route path="pdfs" element={<Pdfs />} />
           <Route path="flow-images" element={<FlowImages />} />
+          <Route path="programs" element={<Programs />} />
+          <Route path="batches" element={<Batches />} />
+          <Route path="bookings" element={<Bookings />} />
+          <Route path="sequences" element={<Sequences />} />
+          <Route path="broadcasts" element={<Broadcasts />} />
+          <Route path="offers" element={<Offers />} />
+          <Route path="faqs" element={<FAQs />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

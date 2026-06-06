@@ -1,8 +1,8 @@
 /**
  * WhatsApp Flow Endpoint — RSA + AES-128-GCM encrypted exchange.
  *
- * Receives INIT / data_exchange / BACK / ping actions from Meta and returns the
- * next screen with dynamic content (banners as base64, registered-user state, events, etc.).
+ * Handles INIT / data_exchange / BACK / ping from Meta.
+ * Returns dynamic screen data (programs, batches, banners, user state, events, etc.)
  */
 const express = require('express');
 const crypto = require('crypto');
@@ -16,70 +16,57 @@ const User = require('../models/User');
 const Event = require('../models/Event');
 const Enquiry = require('../models/Enquiry');
 const Pdf = require('../models/Pdf');
+const Program = require('../models/Program');
+const Batch = require('../models/Batch');
+const Booking = require('../models/Booking');
+const NurtureSequence = require('../models/NurtureSequence');
+const { startSequence } = require('../services/sequenceEngine');
 
 const router = express.Router();
 
+/* ─────────────────── Debug logger ─────────────────── */
 const LOG_PATH = path.join(__dirname, '..', 'flow-debug.log');
 function dbg(...args) {
   const line =
     `[${new Date().toISOString()}] ` +
-    args
-      .map((a) => (typeof a === 'string' ? a : JSON.stringify(a, null, 2)))
-      .join(' ') +
+    args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a, null, 2))).join(' ') +
     '\n';
-  try {
-    fs.appendFileSync(LOG_PATH, line);
-  } catch {}
+  try { fs.appendFileSync(LOG_PATH, line); } catch {}
   console.log('[FlowEndpoint]', ...args);
 }
 
-/* ───────── Encryption helpers ───────── */
-
+/* ─────────────────── Encryption ─────────────────── */
 const FLOW_PRIVATE_KEY_RAW = process.env.FLOW_PRIVATE_KEY || '';
 const FLOW_PRIVATE_KEY = FLOW_PRIVATE_KEY_RAW.split('\\n').join('\n');
 
 function decryptRequest(body) {
   const { encrypted_aes_key, encrypted_flow_data, initial_vector } = body || {};
-
   if (!FLOW_PRIVATE_KEY) {
-    // Development fallback: accept plain JSON
     return { decryptedBody: body, aesKeyBuffer: null, ivBuffer: null };
   }
   if (!encrypted_aes_key || !encrypted_flow_data || !initial_vector) {
     throw new Error('Missing encryption fields');
   }
-
   const privateKey = crypto.createPrivateKey({ key: FLOW_PRIVATE_KEY, format: 'pem' });
   const aesKeyBuffer = crypto.privateDecrypt(
-    {
-      key: privateKey,
-      padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-      oaepHash: 'sha256',
-    },
+    { key: privateKey, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' },
     Buffer.from(encrypted_aes_key, 'base64')
   );
-
   const ivBuffer = Buffer.from(initial_vector, 'base64');
   const flowDataBuffer = Buffer.from(encrypted_flow_data, 'base64');
   const TAG_LEN = 16;
   const authTag = flowDataBuffer.slice(-TAG_LEN);
   const ciphertext = flowDataBuffer.slice(0, -TAG_LEN);
-
   const decipher = crypto.createDecipheriv('aes-128-gcm', aesKeyBuffer, ivBuffer);
   decipher.setAuthTag(authTag);
   const plain = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-  const decryptedBody = JSON.parse(plain.toString('utf-8'));
-
-  return { decryptedBody, aesKeyBuffer, ivBuffer };
+  return { decryptedBody: JSON.parse(plain.toString('utf-8')), aesKeyBuffer, ivBuffer };
 }
 
 function encryptResponse(obj, aesKeyBuffer, ivBuffer) {
-  if (!aesKeyBuffer || !ivBuffer) return obj; // dev plain mode
-
-  // Flip IV bits for response
+  if (!aesKeyBuffer || !ivBuffer) return obj;
   const flipped = Buffer.alloc(ivBuffer.length);
   for (let i = 0; i < ivBuffer.length; i++) flipped[i] = ~ivBuffer[i] & 0xff;
-
   const cipher = crypto.createCipheriv('aes-128-gcm', aesKeyBuffer, flipped);
   const out = Buffer.concat([
     cipher.update(JSON.stringify(obj), 'utf-8'),
@@ -89,8 +76,7 @@ function encryptResponse(obj, aesKeyBuffer, ivBuffer) {
   return out.toString('base64');
 }
 
-/* ───────── Image cache (10 min, manually invalidated on admin upload) ───────── */
-
+/* ─────────────────── Image cache ─────────────────── */
 let imgCache = { data: null, ts: 0 };
 const IMG_TTL = 10 * 60 * 1000;
 
@@ -100,38 +86,21 @@ function clearImageCache() {
 
 async function loadImagesB64() {
   if (imgCache.data && Date.now() - imgCache.ts < IMG_TTL) return imgCache.data;
-
   const keys = [
     'flow_welcome_banner',
-    'icon_register',
-    'icon_profile',
-    'icon_yoga_packages',
-    'icon_training_packages',
-    'icon_events',
-    'icon_enquiry',
-    'icon_pdfs',
-    'icon_yoga_retreats',
-    'icon_sound_healing',
-    'icon_special_yoga_day',
-    'icon_meditation_training',
-    'icon_sound_healing_training',
-    'icon_yoga_training',
-    'banner_register',
-    'banner_profile',
-    'banner_yoga_packages',
-    'banner_training_packages',
-    'banner_events',
-    'banner_enquiry',
+    'icon_register', 'icon_profile',
+    'icon_ttc', 'icon_practice', 'icon_retreat',
+    'icon_events', 'icon_enquiry', 'icon_pdfs',
+    'banner_register', 'banner_profile',
+    'banner_ttc', 'banner_practice', 'banner_retreat',
+    'banner_events', 'banner_enquiry',
+    'chat_welcome_header',
   ];
   const map = await flowImages.getMap(keys);
-
-  // Convert all in parallel
   const entries = await Promise.all(
     keys.map(async (k) => {
       const url = map[k];
       if (!url) return [k, ''];
-      // Icons: 200x200 square (used inside RadioButton data-source items)
-      // Banners: 1000x125 (8:1 — matches the Image component dimensions in flowJson.js)
       const isIcon = k.startsWith('icon_');
       const opts = isIcon
         ? { width: 200, height: 200, crop: 'fill', quality: 75, format: 'jpg' }
@@ -145,8 +114,7 @@ async function loadImagesB64() {
   return data;
 }
 
-/* ───────── Helpers ───────── */
-
+/* ─────────────────── Helpers ─────────────────── */
 function withImage(item, b64) {
   if (b64) item.image = b64;
   return item;
@@ -164,146 +132,191 @@ function formatDate(d) {
   return dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+function flowMode() {
+  return String(process.env.WHATSAPP_FLOW_STATUS || '').toUpperCase() === 'PUBLISHED'
+    ? 'published' : 'draft';
+}
+
 async function buildServiceList(images, isRegistered) {
   const list = [];
+  // TTC, Practice, Retreat always shown first
+  list.push(
+    withImage({ id: 'ttc', title: '🎓 Become a Teacher', description: 'YA-certified TTC programs in Rishikesh' }, images.icon_ttc),
+    withImage({ id: 'practice', title: '🧘 Deepen Practice', description: 'Immersive yoga practice programs' }, images.icon_practice),
+    withImage({ id: 'retreat', title: '🏕️ Retreat / Short Program', description: '7–26 night Himalayan retreats' }, images.icon_retreat)
+  );
   if (isRegistered) {
-    list.push(
-      withImage(
-        { id: 'profile', title: 'My Profile', description: 'View your registration details' },
-        images.icon_profile
-      )
-    );
+    list.push(withImage({ id: 'profile', title: '👤 My Profile', description: 'View your registration details' }, images.icon_profile));
   } else {
-    list.push(
-      withImage(
-        { id: 'register', title: 'Register', description: 'Join Himalayan Yoga Academy' },
-        images.icon_register
-      )
-    );
+    list.push(withImage({ id: 'register', title: '👤 Register', description: 'Join Himalayan Yoga Academy' }, images.icon_register));
   }
   list.push(
-    withImage(
-      { id: 'yoga_packages', title: 'Yoga Packages', description: 'Retreats, sound healing & more' },
-      images.icon_yoga_packages
-    ),
-    withImage(
-      { id: 'training_packages', title: 'Training Packages', description: 'Yoga, meditation & sound training' },
-      images.icon_training_packages
-    ),
-    withImage(
-      { id: 'events', title: 'Events', description: 'Upcoming events & workshops' },
-      images.icon_events
-    ),
-    withImage(
-      { id: 'enquiry', title: 'Enquiry', description: 'Send us a message' },
-      images.icon_enquiry
-    )
+    withImage({ id: 'events', title: '📅 Events', description: 'Upcoming events & workshops' }, images.icon_events),
+    withImage({ id: 'enquiry', title: '✉️ Enquiry', description: 'Send us a message' }, images.icon_enquiry)
   );
-
-  // Append PDFs tile only when at least one active PDF is uploaded by admin.
   const pdfCount = await Pdf.countDocuments({ active: true });
   if (pdfCount > 0) {
-    list.push(
-      withImage(
-        { id: 'pdfs', title: 'PDF Resources', description: `${pdfCount} document${pdfCount > 1 ? 's' : ''} available` },
-        images.icon_pdfs
-      )
-    );
+    list.push(withImage(
+      { id: 'pdfs', title: '📄 PDF Resources', description: `${pdfCount} document${pdfCount > 1 ? 's' : ''} available` },
+      images.icon_pdfs
+    ));
   }
   return list;
 }
 
-/** Fetch active PDFs and shape them as RadioButton data-source items (id/title/description/image). */
-async function buildPdfsList() {
-  const pdfs = await Pdf.find({ active: true }).sort({ createdAt: -1 }).limit(20).lean();
-  return Promise.all(
-    pdfs.map(async (p) => {
-      const item = {
-        id: p._id.toString(),
-        title: (p.name || 'Resource').substring(0, 30),
-        description: (p.description || 'PDF document').substring(0, 60),
-      };
-      if (p.imageUrl) {
-        const b64 = await urlToBase64(p.imageUrl, {
-          width: 200,
-          height: 200,
-          crop: 'fill',
-          quality: 75,
-          format: 'jpg',
-        });
-        if (b64) item.image = b64;
-      }
-      return item;
-    })
-  );
+/** Load active programs of a type as flow radio items (with logo as base64 image) */
+async function buildProgramItems(type) {
+  const programs = await Program.find({ type, active: true }).sort({ sortOrder: 1 }).lean();
+  return Promise.all(programs.map(async (p) => {
+    const item = {
+      id: p._id.toString(),
+      title: p.name.substring(0, 30),
+      description: `${p.durationDays ? p.durationDays + ' days · ' : ''}₹${p.price.toLocaleString('en-IN')}`,
+    };
+    if (p.logoUrl) {
+      const b64 = await urlToBase64(p.logoUrl, { width: 200, height: 200, crop: 'fill', quality: 75, format: 'jpg' });
+      if (b64) item.image = b64;
+    }
+    return item;
+  }));
 }
 
-function buildYogaPackages(images) {
-  return [
-    withImage(
-      { id: 'yoga_retreats', title: 'Yoga Retreats', description: 'Multi-day retreats in the Himalayas' },
-      images.icon_yoga_retreats
-    ),
-    withImage(
-      { id: 'sound_healing', title: 'Sound Healing', description: 'Restorative sound therapy sessions' },
-      images.icon_sound_healing
-    ),
-    withImage(
-      {
-        id: 'special_yoga_day',
-        title: 'Special Yoga Day Package',
-        description: 'Curated single-day immersive package',
-      },
-      images.icon_special_yoga_day
-    ),
-  ];
-}
-
-function buildTrainingPackages(images) {
-  return [
-    withImage(
-      { id: 'meditation_training', title: 'Meditation Training', description: 'Guided daily meditation course' },
-      images.icon_meditation_training
-    ),
-    withImage(
-      { id: 'sound_healing_training', title: 'Sound Healing', description: 'Become a certified sound healer' },
-      images.icon_sound_healing_training
-    ),
-    withImage(
-      { id: 'yoga_training', title: 'Yoga Training', description: 'Yoga teacher training program' },
-      images.icon_yoga_training
-    ),
-  ];
+/** Load active batches for a program as flow radio items */
+async function buildBatchItems(programId, programType) {
+  const filter = { active: true };
+  if (programId) filter.programId = programId;
+  if (programType) filter.programType = programType;
+  const now = new Date();
+  filter.startDate = { $gte: now };
+  const batches = await Batch.find(filter).sort({ startDate: 1 }).lean();
+  return batches.map((b) => {
+    const spotsLeft = Math.max(0, b.spotsTotal - b.spotsBooked);
+    const price = b.price || 0;
+    const timing = b.sessionTiming ? ` · ${b.sessionTiming}` : '';
+    return {
+      id: b._id.toString(),
+      title: b.name.substring(0, 30),
+      description: `₹${price.toLocaleString('en-IN')}${timing} · ${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left`,
+    };
+  });
 }
 
 async function buildEventsList() {
   const now = new Date();
-  const events = await Event.find({ active: true, toDate: { $gte: now } })
-    .sort({ fromDate: 1 })
-    .limit(10)
-    .lean();
-
+  const events = await Event.find({ active: true, toDate: { $gte: now } }).sort({ fromDate: 1 }).limit(10).lean();
   if (!events.length) return [];
-
-  // Convert each event image to base64
-  return Promise.all(
-    events.map(async (ev) => {
-      const item = {
-        id: ev._id.toString(),
-        title: ev.title.substring(0, 30),
-        description: `${formatDate(ev.fromDate)} – ${formatDate(ev.toDate)}`,
-      };
-      if (ev.image) {
-        const b64 = await urlToBase64(ev.image, { width: 200, height: 200, format: 'png' });
-        if (b64) item.image = b64;
-      }
-      return item;
-    })
-  );
+  return Promise.all(events.map(async (ev) => {
+    const item = {
+      id: ev._id.toString(),
+      title: ev.title.substring(0, 30),
+      description: `${formatDate(ev.fromDate)} – ${formatDate(ev.toDate)}`,
+    };
+    if (ev.image) {
+      const b64 = await urlToBase64(ev.image, { width: 200, height: 200, format: 'png' });
+      if (b64) item.image = b64;
+    }
+    return item;
+  }));
 }
 
-/* ───────── Handler ───────── */
+async function buildPdfsList() {
+  const pdfs = await Pdf.find({ active: true }).sort({ createdAt: -1 }).limit(20).lean();
+  return Promise.all(pdfs.map(async (p) => {
+    const item = {
+      id: p._id.toString(),
+      title: (p.name || 'Resource').substring(0, 30),
+      description: (p.description || 'PDF document').substring(0, 60),
+    };
+    if (p.imageUrl) {
+      const b64 = await urlToBase64(p.imageUrl, { width: 200, height: 200, crop: 'fill', quality: 75, format: 'jpg' });
+      if (b64) item.image = b64;
+    }
+    return item;
+  }));
+}
 
+/** Send the post-flow intent message (PDF brochure + body + Yes/No reply buttons) */
+async function sendIntentMessage(phone, { programId, batchId, programType }) {
+  try {
+    const program = programId ? await Program.findById(programId).lean() : null;
+    const batch = batchId ? await Batch.findById(batchId).lean() : null;
+    if (!program) return;
+
+    const price = (batch?.price || program.price || 0).toLocaleString('en-IN');
+    const batchName = batch?.name || '';
+    const dates = batch
+      ? `${formatDate(batch.startDate)} – ${formatDate(batch.endDate)}`
+      : '';
+    const timing = batch?.sessionTiming || '';
+
+    let body = `*${program.name}*\n\n`;
+    if (dates) body += `📅 ${batchName}${dates ? ': ' + dates : ''}${timing ? ' · ' + timing : ''}\n`;
+    body += `📍 Rishikesh, Uttarakhand\n`;
+    body += `💰 Fee: ₹${price}\n\n`;
+    body += `Are you ready to secure your spot? 🙏`;
+
+    const flowId = process.env.WHATSAPP_FLOW_ID;
+    const mode = flowMode();
+
+    // Store pending booking intent for Yes/No handler
+    await Booking.findOneAndUpdate(
+      { phone, paymentStatus: { $in: ['pending', 'failed'] }, programId },
+      {
+        $set: {
+          phone,
+          programId: program._id,
+          batchId: batch?._id || null,
+          programType: program.type,
+          programName: program.name,
+          batchName: batch?.name || '',
+          amountPaid: batch?.price || program.price || 0,
+          paymentStatus: 'pending',
+          currentFlow: 'w1',
+          intent: program.type,
+        },
+      },
+      { upsert: true, new: true }
+    );
+
+    if (program.brochurePdfUrl && flowId) {
+      await meta.sendFlowMessage(phone, {
+        flowId,
+        flowCta: 'Yes, Book Now',
+        headerDocumentUrl: program.brochurePdfUrl,
+        headerDocumentFilename: program.brochurePdfName || 'Brochure.pdf',
+        bodyText: body,
+        footerText: 'Himalayan Yoga Academy',
+        flowToken: `welcome_${phone}`,
+        mode,
+      });
+    } else if (flowId) {
+      await meta.sendFlowMessage(phone, {
+        flowId,
+        flowCta: 'Yes, Book Now',
+        headerText: 'Himalayan Yoga Academy',
+        bodyText: body,
+        footerText: 'Himalayan Yoga Academy',
+        flowToken: `welcome_${phone}`,
+        mode,
+      });
+    } else {
+      await meta.sendText(phone, body);
+    }
+
+    // Also send plain reply buttons (Yes/No)
+    await meta.sendReplyButtons(phone, {
+      bodyText: 'Ready to confirm your booking?',
+      buttons: [
+        { id: 'yes_book', title: 'Yes, Book Now ✅' },
+        { id: 'no_later', title: 'No, Not Yet ❌' },
+      ],
+    }).catch(() => {}); // graceful fallback if not supported
+  } catch (err) {
+    console.error('[flowEndpoint] sendIntentMessage error:', err.message);
+  }
+}
+
+/* ─────────────────── Router handler ─────────────────── */
 router.post('/', async (req, res) => {
   let aesKeyBuffer, ivBuffer, decryptedBody;
   try {
@@ -316,12 +329,9 @@ router.post('/', async (req, res) => {
   const { action, screen, data, flow_token, version } = decryptedBody || {};
   dbg('REQUEST', { action, screen, flow_token, version, data });
 
-  // ping health-check
   if (action === 'ping') {
     return sendResponse(res, { data: { status: 'active' } }, aesKeyBuffer, ivBuffer);
   }
-
-  // error notification
   if (data?.error) {
     dbg('CLIENT_ERROR', data);
     return sendResponse(res, { data: { acknowledged: true } }, aesKeyBuffer, ivBuffer);
@@ -329,34 +339,25 @@ router.post('/', async (req, res) => {
 
   try {
     let response;
-
-    if (action === 'INIT') {
-      response = await handleInit(flow_token);
-    } else if (action === 'BACK') {
+    if (action === 'INIT' || action === 'BACK') {
       response = await handleInit(flow_token);
     } else if (action === 'data_exchange') {
       response = await handleDataExchange({ screen, data, flow_token });
     } else {
       response = await handleInit(flow_token);
     }
-
     dbg('RESPONSE', { screen: response?.screen, dataKeys: Object.keys(response?.data || {}) });
     return sendResponse(res, response, aesKeyBuffer, ivBuffer);
   } catch (err) {
     dbg('HANDLER_ERROR', { message: err.message, stack: err.stack });
-    const fallback = {
+    return sendResponse(res, {
       screen: 'INFO',
-      data: {
-        info_title: 'Something went wrong',
-        info_body: 'Please try again later.',
-      },
-    };
-    return sendResponse(res, fallback, aesKeyBuffer, ivBuffer);
+      data: { info_title: 'Something went wrong', info_body: 'Please try again later.' },
+    }, aesKeyBuffer, ivBuffer);
   }
 });
 
 function sendResponse(res, obj, aesKeyBuffer, ivBuffer) {
-  // Meta data-API 3.0 requires every response to include the version.
   const payload = { version: '3.0', ...obj };
   const out = encryptResponse(payload, aesKeyBuffer, ivBuffer);
   if (typeof out === 'string') {
@@ -366,7 +367,7 @@ function sendResponse(res, obj, aesKeyBuffer, ivBuffer) {
   return res.json(out);
 }
 
-/* ───────── INIT ───────── */
+/* ─────────────────── INIT ─────────────────── */
 async function handleInit(flow_token) {
   const phone = phoneFromToken(flow_token);
   const images = await loadImagesB64();
@@ -383,14 +384,59 @@ async function handleInit(flow_token) {
   };
 }
 
-/* ───────── data_exchange ───────── */
+/* ─────────────────── data_exchange ─────────────────── */
 async function handleDataExchange({ screen, data, flow_token }) {
   const phone = phoneFromToken(flow_token);
   const images = await loadImagesB64();
 
-  // ─── From SERVICE_SELECT — route to next screen ───
+  /* ── SERVICE_SELECT routing ── */
   if (screen === 'SERVICE_SELECT') {
     const sel = data?.selected_service;
+
+    if (sel === 'ttc') {
+      const batches = await buildBatchItems(null, 'ttc');
+      if (!batches.length) {
+        return { screen: 'INFO', data: { info_title: 'No batches available', info_body: 'No TTC batches are scheduled right now. Please check back soon or send an Enquiry 🙏' } };
+      }
+      return {
+        screen: 'TTC_COURSE_SELECT',
+        data: {
+          ttc_banner: images.banner_ttc || '',
+          has_ttc_banner: !!images.banner_ttc,
+          batches,
+        },
+      };
+    }
+
+    if (sel === 'practice') {
+      const programs = await buildProgramItems('practice');
+      if (!programs.length) {
+        return { screen: 'INFO', data: { info_title: 'No programs yet', info_body: 'Practice programs are being scheduled. Please enquire and we will reach out 🙏' } };
+      }
+      return {
+        screen: 'PRACTICE_PROGRAM_SELECT',
+        data: {
+          practice_banner: images.banner_practice || '',
+          has_practice_banner: !!images.banner_practice,
+          programs,
+        },
+      };
+    }
+
+    if (sel === 'retreat') {
+      const programs = await buildProgramItems('retreat');
+      if (!programs.length) {
+        return { screen: 'INFO', data: { info_title: 'No retreats yet', info_body: 'Retreat programs are being updated. Please enquire and we will contact you 🙏' } };
+      }
+      return {
+        screen: 'RETREAT_PROGRAM_SELECT',
+        data: {
+          retreat_banner: images.banner_retreat || '',
+          has_retreat_banner: !!images.banner_retreat,
+          programs,
+        },
+      };
+    }
 
     if (sel === 'register') {
       return {
@@ -402,224 +448,168 @@ async function handleDataExchange({ screen, data, flow_token }) {
         },
       };
     }
+
     if (sel === 'profile') {
       const user = phone ? await User.findOne({ phone }).lean() : null;
       const info = user
-        ? [
-            `Name: ${user.name}`,
-            user.email ? `Email: ${user.email}` : null,
-            `WhatsApp: ${user.phone}`,
-            user.dob ? `DOB: ${user.dob}` : null,
-            user.gender ? `Gender: ${user.gender}` : null,
-            `Member since: ${formatDate(user.registeredAt || user.createdAt)}`,
-          ]
-            .filter(Boolean)
-            .join('\n')
+        ? [`Name: ${user.name}`, user.email ? `Email: ${user.email}` : null, `WhatsApp: ${user.phone}`, user.dob ? `DOB: ${user.dob}` : null, user.gender ? `Gender: ${user.gender}` : null, `Member since: ${formatDate(user.registeredAt || user.createdAt)}`].filter(Boolean).join('\n')
         : 'No profile found. Please register first.';
-
       return {
         screen: 'PROFILE',
-        data: {
-          profile_banner: images.banner_profile || '',
-          has_profile_banner: !!images.banner_profile,
-          profile_info: info,
-        },
+        data: { profile_banner: images.banner_profile || '', has_profile_banner: !!images.banner_profile, profile_info: info },
       };
     }
-    if (sel === 'yoga_packages') {
-      return {
-        screen: 'YOGA_PACKAGES',
-        data: {
-          yoga_banner: images.banner_yoga_packages || '',
-          has_yoga_banner: !!images.banner_yoga_packages,
-          packages: buildYogaPackages(images),
-        },
-      };
-    }
-    if (sel === 'training_packages') {
-      return {
-        screen: 'TRAINING_PACKAGES',
-        data: {
-          training_banner: images.banner_training_packages || '',
-          has_training_banner: !!images.banner_training_packages,
-          trainings: buildTrainingPackages(images),
-        },
-      };
-    }
+
     if (sel === 'events') {
       const events = await buildEventsList();
       if (!events.length) {
-        return {
-          screen: 'INFO',
-          data: {
-            info_title: 'No upcoming events',
-            info_body: 'There are no events scheduled right now. Please check back soon 🙏',
-          },
-        };
+        return { screen: 'INFO', data: { info_title: 'No upcoming events', info_body: 'No events scheduled right now. Please check back soon 🙏' } };
       }
       return {
         screen: 'EVENTS',
-        data: {
-          events_banner: images.banner_events || '',
-          has_events_banner: !!images.banner_events,
-          events,
-        },
+        data: { events_banner: images.banner_events || '', has_events_banner: !!images.banner_events, events },
       };
     }
+
     if (sel === 'enquiry') {
       const user = phone ? await User.findOne({ phone }).lean() : null;
       return {
         screen: 'ENQUIRY',
-        data: {
-          enquiry_banner: images.banner_enquiry || '',
-          has_enquiry_banner: !!images.banner_enquiry,
-          init_phone: phone,
-          init_name: user?.name || '',
-        },
+        data: { enquiry_banner: images.banner_enquiry || '', has_enquiry_banner: !!images.banner_enquiry, init_phone: phone, init_name: user?.name || '' },
       };
     }
+
     if (sel === 'pdfs') {
       const pdfs = await buildPdfsList();
       if (!pdfs.length) {
-        return {
-          screen: 'INFO',
-          data: {
-            info_title: 'No resources yet',
-            info_body: 'Our team will publish PDF resources here soon. Please check back later 🙏',
-          },
-        };
+        return { screen: 'INFO', data: { info_title: 'No resources yet', info_body: 'PDF resources will be published here soon 🙏' } };
       }
-      return {
-        screen: 'PDFS',
-        data: {
-          pdfs_banner: '',
-          has_pdfs_banner: false,
-          pdfs,
-        },
-      };
+      return { screen: 'PDFS', data: { pdfs } };
     }
-    // Unknown selection -> back to start
+
     return handleInit(flow_token);
   }
 
-  // ─── REGISTER form submitted ───
+  /* ── TTC batch picked ── */
+  if (screen === 'TTC_COURSE_SELECT' && data?.action === 'ttc_batch_pick') {
+    const batchId = data.selected_batch;
+    const batch = batchId ? await Batch.findById(batchId).lean() : null;
+    const program = batch ? await Program.findById(batch.programId).lean() : null;
+    const dateStr = batch ? `${formatDate(batch.startDate)} – ${formatDate(batch.endDate)}` : '';
+    const confirmText = program ? `${program.name}${dateStr ? ' · ' + dateStr : ''}` : 'Course selected';
+    return {
+      screen: 'TTC_CONFIRM',
+      data: {
+        confirm_text: confirmText,
+        selected_batch: batchId || '',
+      },
+    };
+  }
+
+  /* ── Practice program picked → show sessions ── */
+  if (screen === 'PRACTICE_PROGRAM_SELECT' && data?.action === 'practice_program_pick') {
+    const programId = data.selected_program;
+    const program = programId ? await Program.findById(programId).lean() : null;
+    const sessions = await buildBatchItems(programId, 'practice');
+    if (!sessions.length) {
+      return { screen: 'INFO', data: { info_title: 'No sessions available', info_body: 'No sessions are currently scheduled for this program. Please enquire 🙏' } };
+    }
+    return {
+      screen: 'PRACTICE_SESSION_SELECT',
+      data: {
+        program_name: program?.name || 'Practice Program',
+        sessions,
+      },
+    };
+  }
+
+  /* ── Practice session picked ── */
+  if (screen === 'PRACTICE_SESSION_SELECT' && data?.action === 'practice_session_pick') {
+    const batchId = data.selected_session;
+    const batch = batchId ? await Batch.findById(batchId).lean() : null;
+    const program = batch ? await Program.findById(batch.programId).lean() : null;
+    const confirmText = program
+      ? `${program.name} — ${formatDate(batch?.startDate)}${batch?.sessionTiming ? ' · ' + batch.sessionTiming : ''}`
+      : 'Session selected';
+    return {
+      screen: 'PRACTICE_CONFIRM',
+      data: {
+        confirm_text: confirmText,
+        selected_batch: batchId || '',
+        selected_program: batch?.programId?.toString() || '',
+      },
+    };
+  }
+
+  /* ── Retreat program picked → show dates ── */
+  if (screen === 'RETREAT_PROGRAM_SELECT' && data?.action === 'retreat_program_pick') {
+    const programId = data.selected_program;
+    const program = programId ? await Program.findById(programId).lean() : null;
+    const dates = await buildBatchItems(programId, 'retreat');
+    if (!dates.length) {
+      return { screen: 'INFO', data: { info_title: 'No dates available', info_body: 'No retreat dates are scheduled right now. Please enquire 🙏' } };
+    }
+    return {
+      screen: 'RETREAT_DATE_SELECT',
+      data: {
+        program_name: program?.name || 'Retreat Program',
+        dates,
+      },
+    };
+  }
+
+  /* ── Retreat date picked ── */
+  if (screen === 'RETREAT_DATE_SELECT' && data?.action === 'retreat_date_pick') {
+    const batchId = data.selected_date;
+    const batch = batchId ? await Batch.findById(batchId).lean() : null;
+    const program = batch ? await Program.findById(batch.programId).lean() : null;
+    const dateStr = batch ? `${formatDate(batch.startDate)} – ${formatDate(batch.endDate)}` : '';
+    const confirmText = program ? `${program.name} — ${dateStr}` : 'Retreat dates selected';
+    return {
+      screen: 'RETREAT_CONFIRM',
+      data: {
+        confirm_text: confirmText,
+        selected_batch: batchId || '',
+        selected_program: batch?.programId?.toString() || '',
+      },
+    };
+  }
+
+  /* ── REGISTER submit ── */
   if (screen === 'REGISTER') {
     const name = (data.full_name || '').trim();
     const email = (data.email || '').trim();
     const dob = data.dob || '';
     const gender = (data.gender || '').toLowerCase();
-
     if (!name || !phone) {
-      return {
-        screen: 'INFO',
-        data: { info_title: 'Missing details', info_body: 'Name and WhatsApp number are required.' },
-      };
+      return { screen: 'INFO', data: { info_title: 'Missing details', info_body: 'Name and WhatsApp number are required.' } };
     }
-
     await User.findOneAndUpdate(
       { phone },
-      {
-        $set: {
-          phone,
-          name,
-          email,
-          dob,
-          gender: ['male', 'female', 'other'].includes(gender) ? gender : '',
-        },
-        $setOnInsert: { registeredAt: new Date() },
-      },
+      { $set: { phone, name, email, dob, gender: ['male', 'female', 'other'].includes(gender) ? gender : '' }, $setOnInsert: { registeredAt: new Date() } },
       { upsert: true, new: true }
     );
-
     return {
       screen: 'INFO',
-      data: {
-        info_title: '🙏 Registration successful',
-        info_body: `Welcome to Himalayan Yoga Academy, ${name}!\n\nYou can come back any time and choose *My Profile* from the menu.`,
-      },
+      data: { info_title: '🙏 Registration successful', info_body: `Welcome to Himalayan Yoga Academy, ${name}!\n\nYou can come back any time and choose *My Profile* from the menu.` },
     };
   }
 
-  // ─── PROFILE close ───
+  /* ── PROFILE close ── */
   if (screen === 'PROFILE') {
-    return {
-      screen: 'INFO',
-      data: { info_title: 'Namaste 🙏', info_body: 'Type *hi* anytime to open the menu again.' },
-    };
+    return { screen: 'INFO', data: { info_title: 'Namaste 🙏', info_body: 'Type *hi* anytime to open the menu again.' } };
   }
 
-  // ─── YOGA_PACKAGES selection ───
-  if (screen === 'YOGA_PACKAGES') {
-    const map = {
-      yoga_retreats: 'Yoga Retreats',
-      sound_healing: 'Sound Healing',
-      special_yoga_day: 'Special Yoga Day Package',
-    };
-    const title = map[data.selected_package] || 'Yoga Package';
-    // Auto-record an enquiry
-    const user = phone ? await User.findOne({ phone }).lean() : null;
-    await Enquiry.create({
-      name: user?.name || 'WhatsApp User',
-      phone,
-      enquiry: `Interested in Yoga Package: ${title}`,
-    }).catch(() => {});
-
-    return {
-      screen: 'INFO',
-      data: {
-        info_title: `${title} 🧘`,
-        info_body:
-          `Thank you for your interest in *${title}*.\n\n` +
-          `Our team will reach out shortly with details and pricing.`,
-      },
-    };
-  }
-
-  // ─── TRAINING_PACKAGES selection ───
-  if (screen === 'TRAINING_PACKAGES') {
-    const map = {
-      meditation_training: 'Meditation Training',
-      sound_healing_training: 'Sound Healing',
-      yoga_training: 'Yoga Training',
-    };
-    const title = map[data.selected_training] || 'Training Package';
-    const user = phone ? await User.findOne({ phone }).lean() : null;
-    await Enquiry.create({
-      name: user?.name || 'WhatsApp User',
-      phone,
-      enquiry: `Interested in Training Package: ${title}`,
-    }).catch(() => {});
-
-    return {
-      screen: 'INFO',
-      data: {
-        info_title: `${title} 🧘‍♂️`,
-        info_body:
-          `Thank you for your interest in *${title}*.\n\n` +
-          `Our team will reach out shortly with details and pricing.`,
-      },
-    };
-  }
-
-  // ─── EVENTS — pick an event ───
+  /* ── EVENTS pick ── */
   if (screen === 'EVENTS') {
     const evId = data.selected_event;
     let ev = null;
-    try {
-      ev = await Event.findById(evId).lean();
-    } catch {
-      ev = null;
-    }
+    try { ev = await Event.findById(evId).lean(); } catch { ev = null; }
     if (!ev) {
-      return {
-        screen: 'INFO',
-        data: { info_title: 'Event not found', info_body: 'Please go back and try again.' },
-      };
+      return { screen: 'INFO', data: { info_title: 'Event not found', info_body: 'Please go back and try again.' } };
     }
     let imgB64 = '';
-    if (ev.image) {
-      imgB64 = await urlToBase64(ev.image, { width: 1000, height: 500, format: 'jpeg' });
-    }
+    if (ev.image) imgB64 = await urlToBase64(ev.image, { width: 1000, height: 500, format: 'jpeg' });
     return {
       screen: 'EVENT_DETAILS',
       data: {
@@ -632,52 +622,27 @@ async function handleDataExchange({ screen, data, flow_token }) {
     };
   }
 
-  // ─── EVENT_DETAILS — register interest ───
+  /* ── EVENT_DETAILS register interest ── */
   if (screen === 'EVENT_DETAILS') {
     const user = phone ? await User.findOne({ phone }).lean() : null;
-    await Enquiry.create({
-      name: user?.name || 'WhatsApp User',
-      phone,
-      enquiry: 'Interested in attending an event',
-    }).catch(() => {});
-    return {
-      screen: 'INFO',
-      data: {
-        info_title: '🎉 Interest noted',
-        info_body: 'Thanks! Our team will follow up with full event details on WhatsApp.',
-      },
-    };
+    await Enquiry.create({ name: user?.name || 'WhatsApp User', phone, enquiry: 'Interested in attending an event' }).catch(() => {});
+    return { screen: 'INFO', data: { info_title: '🎉 Interest noted', info_body: 'Thanks! Our team will follow up with full event details on WhatsApp.' } };
   }
 
-  // Note: the PDFS screen uses the `complete` action (terminal), so it never
-  // arrives here as data_exchange. The webhook handles delivery instead.
-
-  // ─── ENQUIRY submitted ───
+  /* ── ENQUIRY submit ── */
   if (screen === 'ENQUIRY') {
     const name = (data.name || '').trim();
     const enquiry = (data.enquiry || '').trim();
     if (!name || !enquiry || !phone) {
-      return {
-        screen: 'INFO',
-        data: { info_title: 'Missing details', info_body: 'Please fill in your name and enquiry.' },
-      };
+      return { screen: 'INFO', data: { info_title: 'Missing details', info_body: 'Please fill in your name and enquiry.' } };
     }
     await Enquiry.create({ name, phone, enquiry });
-    return {
-      screen: 'INFO',
-      data: {
-        info_title: '🙏 Thank you',
-        info_body: `Hi ${name}, we have received your enquiry and will get back to you soon.`,
-      },
-    };
+    return { screen: 'INFO', data: { info_title: '🙏 Thank you', info_body: `Hi ${name}, we have received your enquiry and will get back to you soon.` } };
   }
 
-  // Fallback
-  return {
-    screen: 'INFO',
-    data: { info_title: 'Namaste 🙏', info_body: 'Type *hi* to open the menu again.' },
-  };
+  return { screen: 'INFO', data: { info_title: 'Namaste 🙏', info_body: 'Type *hi* to open the menu again.' } };
 }
 
 module.exports = router;
 module.exports.clearImageCache = clearImageCache;
+module.exports.sendIntentMessage = sendIntentMessage;

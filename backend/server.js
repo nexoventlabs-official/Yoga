@@ -15,17 +15,20 @@ const enquiriesRoutes = require('./routes/enquiries');
 const flowImagesRoutes = require('./routes/flowImages');
 const dashboardRoutes = require('./routes/dashboard');
 const pdfsRoutes = require('./routes/pdfs');
+const programsRoutes = require('./routes/programs');
+const batchesRoutes = require('./routes/batches');
+const bookingsRoutes = require('./routes/bookings');
+const sequencesRoutes = require('./routes/sequences');
+const broadcastsRoutes = require('./routes/broadcasts');
+const offersRoutes = require('./routes/offers');
+const faqsRoutes = require('./routes/faqs');
 
 const app = express();
 
-// Trust proxy
 app.set('trust proxy', 1);
-
-// Security
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 app.use(compression());
 
-// CORS
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
   .split(',')
   .map((s) => s.trim())
@@ -45,7 +48,6 @@ app.use(
   })
 );
 
-// Body parsers (capture raw body for Meta signature verification)
 app.use(
   express.json({
     limit: '5mb',
@@ -57,17 +59,14 @@ app.use(
   })
 );
 app.use(express.urlencoded({ extended: true, limit: '5mb' }));
-
-// Static
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Health
 app.get('/', (_req, res) =>
   res.json({ name: 'Himalayan Yoga Academy API', status: 'ok', time: new Date().toISOString() })
 );
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
 
-// API routes
+// Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/webhook', webhookRoutes);
 app.use('/api/flow-endpoint', flowEndpointRoutes);
@@ -77,17 +76,20 @@ app.use('/api/enquiries', enquiriesRoutes);
 app.use('/api/flow-images', flowImagesRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/pdfs', pdfsRoutes);
+app.use('/api/programs', programsRoutes);
+app.use('/api/batches', batchesRoutes);
+app.use('/api/bookings', bookingsRoutes);
+app.use('/api/sequences', sequencesRoutes);
+app.use('/api/broadcasts', broadcastsRoutes);
+app.use('/api/offers', offersRoutes);
+app.use('/api/faqs', faqsRoutes);
 
-// 404
 app.use((req, res) => res.status(404).json({ error: 'Not found', path: req.originalUrl }));
-
-// Error handler
 app.use((err, _req, res, _next) => {
   console.error('[ErrorHandler]', err);
   res.status(err.status || 500).json({ error: err.message || 'Internal server error' });
 });
 
-// MongoDB connect & start
 const PORT = parseInt(process.env.PORT || '5000', 10);
 
 async function start() {
@@ -103,7 +105,7 @@ async function start() {
     process.exit(1);
   }
 
-  // Seed default admin if none exists
+  // Seed default admin
   try {
     const Admin = require('./models/Admin');
     const bcrypt = require('bcryptjs');
