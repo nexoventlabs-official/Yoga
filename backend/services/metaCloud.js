@@ -228,7 +228,151 @@ async function uploadBusinessPublicKey(publicKeyPem) {
 }
 
 /**
- * Send interactive reply buttons with a document (PDF) header — all in one message.
+ * Native WhatsApp Pay — Order Details message (student → academy course fee).
+ * https://developers.facebook.com/docs/whatsapp/cloud-api/messages/order-details-messages
+ *
+ * Currency amounts: { value: rupees * offset, offset }  (INR: offset=100)
+ *
+ * @param {string} to
+ * @param {object} opts
+ * @param {string}   opts.referenceId          Unique order ref e.g. BOOKING-<id>
+ * @param {string}   opts.configurationName    Meta payment configuration name
+ * @param {string}   [opts.headerText]         Header text (shown above body)
+ * @param {string}   opts.bodyText
+ * @param {string}   [opts.footerText]
+ * @param {number}   [opts.expirationTimestamp] epoch seconds
+ * @param {Array<{retailerId,name,amount,quantity,saleAmount?}>} opts.items
+ * @param {number}   opts.subtotal             in rupees
+ * @param {string}   [opts.currency='INR']
+ * @param {number}   [opts.offset=100]
+ */
+async function sendOrderDetails(to, opts) {
+  const { baseUrl, accessToken } = cfg();
+  const phone = String(to).replace(/\D/g, '');
+
+  const {
+    referenceId,
+    configurationName,
+    headerText,
+    bodyText,
+    footerText,
+    expirationTimestamp,
+    items,
+    subtotal,
+    currency = 'INR',
+    offset = 100,
+  } = opts;
+
+  if (!referenceId) throw new Error('sendOrderDetails: referenceId required');
+  if (!configurationName) throw new Error('sendOrderDetails: configurationName required');
+  if (!Array.isArray(items) || items.length === 0) throw new Error('sendOrderDetails: items required');
+
+  const toMoney = (amt) => ({ value: Math.round(Number(amt || 0) * offset), offset });
+
+  const totalValue = items.reduce((s, it) => {
+    const each = toMoney(it.saleAmount ?? it.amount).value;
+    return s + each * (it.quantity || 1);
+  }, 0);
+  const totalAmount = { value: totalValue, offset };
+
+  const orderItems = items.map((it) => {
+    const o = {
+      retailer_id: String(it.retailerId),
+      name: String(it.name).substring(0, 60),
+      amount: toMoney(it.amount),
+      quantity: it.quantity || 1,
+    };
+    if (it.saleAmount !== undefined) o.sale_amount = toMoney(it.saleAmount);
+    return o;
+  });
+
+  const paymentSetting = {
+    type: 'payment_gateway',
+    payment_gateway: {
+      type: 'razorpay',
+      configuration_name: configurationName,
+      razorpay: {
+        receipt: `hya_${String(referenceId).slice(-12)}`,
+        notes: { reference_id: String(referenceId) },
+      },
+    },
+  };
+
+  const action = {
+    name: 'review_and_pay',
+    parameters: {
+      reference_id: String(referenceId),
+      type: 'digital-goods',
+      currency,
+      total_amount: totalAmount,
+      order: {
+        status: 'pending',
+        items: orderItems,
+        subtotal: toMoney(subtotal),
+      },
+      payment_settings: [paymentSetting],
+    },
+  };
+
+  if (expirationTimestamp) {
+    action.parameters.expiration = {
+      timestamp: String(expirationTimestamp),
+      description: 'Payment link expires',
+    };
+  }
+
+  const interactive = {
+    type: 'order_details',
+    body: { text: bodyText },
+    action,
+  };
+  if (headerText) interactive.header = { type: 'text', text: headerText };
+  if (footerText) interactive.footer = { text: footerText };
+
+  const { data } = await api.post(
+    `${baseUrl}/messages`,
+    { messaging_product: 'whatsapp', recipient_type: 'individual', to: phone, type: 'interactive', interactive },
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  return data;
+}
+
+/**
+ * Update the order_details card status after payment succeeds/fails.
+ * Flips the "Pay now" CTA → completed/canceled.
+ *
+ * @param {string} to
+ * @param {object} opts
+ * @param {string} opts.referenceId   same reference_id used in sendOrderDetails
+ * @param {string} [opts.status]      'processing'|'completed'|'canceled'
+ * @param {string} [opts.description]
+ */
+async function sendOrderStatus(to, { referenceId, status = 'completed', description }) {
+  const { baseUrl, accessToken } = cfg();
+  const phone = String(to).replace(/\D/g, '');
+  if (!referenceId) throw new Error('sendOrderStatus: referenceId required');
+
+  const interactive = {
+    type: 'order_status',
+    body: { text: description || (status === 'completed' ? '✅ Payment received!' : 'Order update') },
+    action: {
+      name: 'review_order',
+      parameters: {
+        reference_id: String(referenceId),
+        order: { status },
+      },
+    },
+  };
+
+  const { data } = await api.post(
+    `${baseUrl}/messages`,
+    { messaging_product: 'whatsapp', recipient_type: 'individual', to: phone, type: 'interactive', interactive },
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  return data;
+}
+
+
  * @param {string} to
  * @param {object} opts
  * @param {string} opts.documentUrl       Public URL of the PDF
@@ -315,6 +459,8 @@ module.exports = {
   sendImage,
   sendDocument,
   sendFlowMessage,
+  sendOrderDetails,
+  sendOrderStatus,
   sendReplyButtons,
   sendReplyButtonsWithDocument,
   createFlow,

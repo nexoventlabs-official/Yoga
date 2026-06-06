@@ -163,22 +163,55 @@ async function handleProgramConfirm(phone, batchId, programType) {
 async function handleReplyButton(phone, buttonId) {
   if (buttonId.startsWith('yes_book_')) {
     const bookingId = buttonId.replace('yes_book_', '');
-    const booking = await Booking.findById(bookingId).lean();
+    const booking = await Booking.findById(bookingId);
     if (!booking) {
       await meta.sendText(phone, 'Sorry, we could not find your booking. Please type *hi* to start again 🙏');
       return;
     }
-    const price = (booking.amountPaid || 0).toLocaleString('en-IN');
-    const msg =
-      `*Amazing! We're so happy to have you* 🎉\n\n` +
-      `*${booking.programName}*${booking.batchName ? ' — ' + booking.batchName : ''}\n` +
-      `💰 Total Fee: ₹${price}\n\n` +
-      `Our team will reach out to you shortly with the payment link and next steps.\n\n` +
-      `If you have any questions in the meantime, feel free to reply here 🙏`;
-    await meta.sendText(phone, msg);
 
-    // Update booking status
-    await Booking.findByIdAndUpdate(bookingId, { currentFlow: 'w3', intent: 'confirmed' }).catch(() => {});
+    const amount = booking.amountPaid || 0;
+    const configName = process.env.META_PAYMENT_CONFIG_NAME || '';
+    const useNativePay = !!(configName && amount > 0);
+
+    if (useNativePay) {
+      // Native WhatsApp Pay — order_details message
+      const referenceId = `BOOKING-${booking._id}`;
+      booking.metaReferenceId = referenceId;
+      booking.metaPaymentStatus = 'pending';
+      await booking.save();
+
+      const expiresAt = Math.floor(Date.now() / 1000) + 24 * 60 * 60; // 24 hours
+      await meta.sendOrderDetails(phone, {
+        referenceId,
+        configurationName: configName,
+        headerText: 'Himalayan Yoga Academy 🧘',
+        bodyText:
+          `*${booking.programName}*${booking.batchName ? ' — ' + booking.batchName : ''}\n\n` +
+          `Complete your payment to confirm your enrollment. Your spot will be reserved once payment is received 🙏`,
+        footerText: 'Secure payment via WhatsApp Pay',
+        expirationTimestamp: expiresAt,
+        items: [{
+          retailerId: booking.batchId?.toString() || booking.programId?.toString() || 'course',
+          name: `${booking.programName}${booking.batchName ? ' — ' + booking.batchName : ''}`,
+          amount,
+          quantity: 1,
+        }],
+        subtotal: amount,
+      });
+
+      console.log(`[webhook] Native payment request sent to ${phone} for ${booking.programName}`);
+    } else {
+      // Native pay not configured — send text confirmation
+      const price = amount.toLocaleString('en-IN');
+      const msg =
+        `*Amazing! We're so happy to have you* 🎉\n\n` +
+        `*${booking.programName}*${booking.batchName ? ' — ' + booking.batchName : ''}\n` +
+        `💰 Total Fee: ₹${price}\n\n` +
+        `Our team will reach out to you shortly with the payment link and next steps.\n\n` +
+        `If you have any questions in the meantime, feel free to reply here 🙏`;
+      await meta.sendText(phone, msg);
+      await Booking.findByIdAndUpdate(bookingId, { currentFlow: 'w3' });
+    }
   }
 
   if (buttonId.startsWith('no_later_')) {
@@ -208,6 +241,109 @@ async function handleReplyButton(phone, buttonId) {
       await Booking.findByIdAndUpdate(booking._id, { currentFlow: 'w2', w2StartDate });
     }
   }
+}
+
+/* ─── Native WhatsApp Pay — payment status handler ─── */
+async function handlePaymentStatus(msg) {
+  // Meta delivers payment status in multiple shapes depending on API version
+  const pay = msg.payment || msg.interactive?.payment || {};
+  const referenceId =
+    pay.reference_id || pay.referenceId ||
+    pay.transaction?.reference_id ||
+    msg.interactive?.payment_status?.reference_id || '';
+  const status = String(
+    pay.status || pay.transaction?.status ||
+    pay.payment_status || msg.interactive?.payment_status?.status || ''
+  ).toLowerCase();
+  const paymentId =
+    pay.transaction?.id || pay.transaction_id ||
+    pay.payment_id || pay.id || '';
+
+  console.log('[webhook] payment notification', { referenceId, status, paymentId });
+
+  if (!referenceId) return false;
+
+  // Find booking by metaReferenceId (BOOKING-<id>)
+  let booking = await Booking.findOne({ metaReferenceId: referenceId });
+  if (!booking) {
+    const stripped = String(referenceId).replace(/^BOOKING-/i, '');
+    if (/^[a-f0-9]{24}$/i.test(stripped)) booking = await Booking.findById(stripped);
+  }
+  if (!booking) {
+    console.warn('[webhook] no booking found for payment reference', referenceId);
+    return true;
+  }
+
+  const phone = String(msg.from || '').replace(/\D/g, '');
+
+  if (['captured', 'success', 'successful', 'paid', 'completed', 'authorized'].includes(status)) {
+    await markBookingPaid(booking, { paymentId, metaPaymentStatus: status, source: 'meta_native_pay' });
+    // Flip order card to completed
+    try {
+      await meta.sendOrderStatus(phone, {
+        referenceId: booking.metaReferenceId,
+        status: 'completed',
+        description: '✅ Payment received! Your spot is confirmed.',
+      });
+    } catch (err) {
+      console.warn('[webhook] sendOrderStatus failed:', err.response?.data || err.message);
+    }
+  } else if (['failed', 'cancelled', 'canceled', 'declined', 'error'].includes(status)) {
+    booking.metaPaymentStatus = status;
+    await booking.save();
+    await meta.sendText(phone,
+      '❌ Payment was not completed. Please try again or type *hi* to restart.\n\nIf you need help, feel free to ask 🙏'
+    ).catch(() => {});
+  } else {
+    // pending/unknown — record for audit
+    booking.metaPaymentStatus = status || booking.metaPaymentStatus;
+    if (paymentId && !booking.paymentTxnId) booking.paymentTxnId = paymentId;
+    await booking.save();
+  }
+  return true;
+}
+
+/* ─── Mark booking as paid ─── */
+async function markBookingPaid(booking, opts = {}) {
+  if (!booking) return false;
+  if (booking.paymentStatus === 'confirmed') return false;
+
+  booking.paymentStatus = 'confirmed';
+  if (opts.paymentId) booking.paymentTxnId = opts.paymentId;
+  if (opts.metaPaymentStatus) booking.metaPaymentStatus = opts.metaPaymentStatus;
+  booking.currentFlow = 'w3';
+  await booking.save();
+
+  // Increment spotsBooked on the batch
+  if (booking.batchId) {
+    await (require('../models/Batch')).findByIdAndUpdate(
+      booking.batchId,
+      { $inc: { spotsBooked: 1 } }
+    ).catch(() => {});
+  }
+
+  // WhatsApp confirmation (non-blocking)
+  setImmediate(async () => {
+    try {
+      const phone = booking.phone;
+      const msg =
+        `✅ *Payment Confirmed!* 🎉\n\n` +
+        `*${booking.programName}*${booking.batchName ? ' — ' + booking.batchName : ''}\n\n` +
+        `Your enrollment is now confirmed! Welcome to Himalayan Yoga Academy 🧘\n\n` +
+        `Our team will reach out with arrival details and next steps.\n\n` +
+        `Booking Reference: *${booking.bookingRef || booking._id}*`;
+      await meta.sendText(phone, msg);
+    } catch (err) {
+      console.error('[webhook] payment success message failed:', err.message);
+    }
+  });
+
+  console.log('[webhook] booking marked paid', {
+    bookingRef: booking.bookingRef,
+    source: opts.source || '',
+    paymentId: opts.paymentId || '',
+  });
+  return true;
 }
 
 /* ─── Webhook verification (Meta GET) ─── */
@@ -243,17 +379,41 @@ router.post('/meta', async (req, res) => {
     const body = req.body || {};
     if (body.object !== 'whatsapp_business_account') return;
 
+    // Log any payment-related payload for diagnostics
+    try {
+      const raw = JSON.stringify(body);
+      if (raw.includes('payment') || raw.includes('order')) {
+        console.log('[webhook] RAW payment-related payload:', raw);
+      }
+    } catch {}
+
     for (const entry of body.entry || []) {
       for (const change of entry.changes || []) {
         const value = change.value || {};
         const messages = value.messages || [];
         const contacts = value.contacts || [];
 
+        // ── Payment status may arrive in value.statuses[] (some API versions) ──
+        for (const st of value.statuses || []) {
+          if (st.payment || st.type === 'payment' || st.order) {
+            await handlePaymentStatus({ from: st.recipient_id || '', payment: st.payment || st, ...st })
+              .catch((e) => console.error('[webhook] status payment error:', e.message));
+          }
+        }
+
         for (const msg of messages) {
           const from = msg.from;
           const profileName = contacts[0]?.profile?.name || '';
           let text = '';
           const type = msg.type;
+
+          // ── Native pay status as top-level message type ──
+          if (msg.type === 'payment') {
+            await handlePaymentStatus(msg).catch((e) =>
+              console.error('[webhook] payment msg error:', e.message)
+            );
+            continue;
+          }
 
           if (msg.type === 'text') {
             text = msg.text?.body || '';
@@ -262,7 +422,14 @@ router.post('/meta', async (req, res) => {
               const handled = await handleFlowCompletion(msg);
               if (handled) continue;
             }
-            // Handle reply buttons (Yes/No after brochure)
+            // ── Native pay status nested under interactive ──
+            if (msg.interactive?.type === 'payment' || msg.interactive?.type === 'payment_status') {
+              await handlePaymentStatus(msg).catch((e) =>
+                console.error('[webhook] interactive payment error:', e.message)
+              );
+              continue;
+            }
+            // Handle reply buttons
             if (msg.interactive?.type === 'button_reply') {
               const buttonId = msg.interactive.button_reply?.id || '';
               const phone = String(from || '').replace(/\D/g, '');
@@ -270,7 +437,6 @@ router.post('/meta', async (req, res) => {
                 await handleReplyButton(phone, buttonId).catch((e) =>
                   console.error('[webhook] handleReplyButton error:', e.message)
                 );
-                // Cancel any active W2 sequence since user re-engaged
                 await NurtureSequence.updateMany(
                   { phone, flowType: 'w2', status: 'active' },
                   { status: 'cancelled' }
@@ -283,7 +449,6 @@ router.post('/meta', async (req, res) => {
           } else if (msg.type === 'button') {
             const buttonText = msg.button?.text || '';
             const phone = String(from || '').replace(/\D/g, '');
-            // Cancel W2 if user replies during nurture sequence
             if (buttonText) {
               await NurtureSequence.updateMany(
                 { phone, flowType: 'w2', status: 'active' },
@@ -293,7 +458,7 @@ router.post('/meta', async (req, res) => {
             text = buttonText;
           }
 
-          // If user sends any text during W2, cancel W2 and re-enter W1
+          // Cancel W2 if user sends text
           if (text && msg.type === 'text') {
             const phone = String(from || '').replace(/\D/g, '');
             const w2Active = await NurtureSequence.findOne({ phone, flowType: 'w2', status: 'active' });

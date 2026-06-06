@@ -22,6 +22,7 @@ const sequencesRoutes = require('./routes/sequences');
 const broadcastsRoutes = require('./routes/broadcasts');
 const offersRoutes = require('./routes/offers');
 const faqsRoutes = require('./routes/faqs');
+const paymentRoutes = require('./routes/payment');
 
 const app = express();
 
@@ -83,6 +84,7 @@ app.use('/api/sequences', sequencesRoutes);
 app.use('/api/broadcasts', broadcastsRoutes);
 app.use('/api/offers', offersRoutes);
 app.use('/api/faqs', faqsRoutes);
+app.use('/api/payment', paymentRoutes);
 
 app.use((req, res) => res.status(404).json({ error: 'Not found', path: req.originalUrl }));
 app.use((err, _req, res, _next) => {
