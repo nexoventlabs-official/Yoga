@@ -1,28 +1,23 @@
 /**
  * Builds the WhatsApp Flow JSON for the Interest Capture flow.
  *
- * This is a simple 2-screen flow:
- *   INTEREST_SELECT  — show course summary + Interested / Not Interested radio
- *   INTEREST_CONFIRM — terminal thank-you screen
- *
- * The flow is opened via a flow message with a PDF document header.
- * On completion, the webhook receives nfm_reply with kind=interest_response.
- *
- * Version: 7.0, Data API: 3.0, Mode: Endpoint (data_exchange)
+ * Single terminal screen — user picks Interested / Not Interested and
+ * taps Submit which closes the flow immediately via 'complete' action.
+ * The nfm_reply is handled in webhook.js.
  */
 function buildInterestFlowJSON() {
   return {
     version: '7.0',
     data_api_version: '3.0',
     routing_model: {
-      INTEREST_SELECT: ['INTEREST_CONFIRM'],
-      INTEREST_CONFIRM: [],
+      INTEREST_SELECT: [],
     },
     screens: [
-      /* ─── INTEREST_SELECT ─── */
       {
         id: 'INTEREST_SELECT',
         title: 'Secure Your Spot',
+        terminal: true,
+        success: true,
         data: {
           course_summary: {
             type: 'string',
@@ -51,41 +46,12 @@ function buildInterestFlowJSON() {
               type: 'Footer',
               label: 'Submit',
               'on-click-action': {
-                name: 'data_exchange',
+                name: 'complete',
                 payload: {
                   kind: 'interest_response',
                   interest: '${form.interest}',
                   booking_id: '${data.booking_id}',
                 },
-              },
-            },
-          ],
-        },
-      },
-
-      /* ─── INTEREST_CONFIRM (terminal) ─── */
-      {
-        id: 'INTEREST_CONFIRM',
-        title: 'Thank You',
-        terminal: true,
-        success: true,
-        data: {
-          message: {
-            type: 'string',
-            __example__: 'Thank you! We will be in touch shortly.',
-          },
-        },
-        layout: {
-          type: 'SingleColumnLayout',
-          children: [
-            { type: 'TextHeading', text: 'Thank you! 🙏' },
-            { type: 'TextBody', text: '${data.message}' },
-            {
-              type: 'Footer',
-              label: 'Close',
-              'on-click-action': {
-                name: 'complete',
-                payload: {},
               },
             },
           ],
