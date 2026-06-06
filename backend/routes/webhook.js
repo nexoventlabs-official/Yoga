@@ -85,8 +85,9 @@ async function handleFlowCompletion(msg) {
 }
 
 /**
- * After flow closes (terminal screen 'complete'), send the brochure + Yes/No message.
- * The student taps Yes → payment message, No → W2 nurture after 48hrs.
+ * After flow closes (terminal screen 'complete'), send:
+ *  1. Brochure PDF as a document message (if available), else plain text
+ *  2. A separate reply-button message with a single "Interested 🙋" button
  */
 async function handleProgramConfirm(phone, batchId, programType) {
   try {
@@ -98,8 +99,6 @@ async function handleProgramConfirm(phone, batchId, programType) {
     const program = await Program.findById(batch.programId).lean();
     if (!program) return;
 
-    const flowId = process.env.WHATSAPP_FLOW_ID;
-    const mode = String(process.env.WHATSAPP_FLOW_STATUS || '').toUpperCase() === 'PUBLISHED' ? 'published' : 'draft';
     const price = (batch.price || program.price || 0).toLocaleString('en-IN');
     const dateStr = `${formatDate(batch.startDate)} – ${formatDate(batch.endDate)}`;
     const timing = batch.sessionTiming ? ` · ${batch.sessionTiming}` : '';
@@ -111,7 +110,7 @@ async function handleProgramConfirm(phone, batchId, programType) {
       `📍 Rishikesh, Uttarakhand\n` +
       `💰 Fee: ₹${price}\n` +
       `🔢 Spots left: ${spotsLeft}\n\n` +
-      `Are you ready to secure your spot?`;
+      `Here are the full details for your selected course. Tap *Interested* below if you'd like to secure your spot!`;
 
     // Save/update pending booking
     const bookingDoc = await Booking.findOneAndUpdate(
@@ -128,30 +127,27 @@ async function handleProgramConfirm(phone, batchId, programType) {
       { upsert: true, new: true }
     );
 
-    // Send brochure (if any) + body + Yes/No reply buttons
-    if (program.brochurePdfUrl && flowId) {
-      await meta.sendFlowMessage(phone, {
-        flowId, flowCta: 'Yes, Book Now',
-        headerDocumentUrl: program.brochurePdfUrl,
-        headerDocumentFilename: program.brochurePdfName || 'Brochure.pdf',
-        bodyText: body, footerText: 'Himalayan Yoga Academy',
-        flowToken: `welcome_${phone}`, mode,
+    // 1. Send brochure PDF as a document, or plain text if no PDF
+    if (program.brochurePdfUrl) {
+      const fileName = (program.brochurePdfName || `${program.name}-Brochure.pdf`)
+        .replace(/[^\w\d.\-_]+/g, '_');
+      await meta.sendDocument(phone, program.brochurePdfUrl, {
+        filename: fileName,
+        caption: body,
       });
     } else {
       await meta.sendText(phone, body);
     }
 
-    // Send explicit Yes/No reply buttons after brochure
-    await new Promise((r) => setTimeout(r, 1500));
+    // Small delay so messages arrive in order
+    await new Promise((r) => setTimeout(r, 1200));
+
+    // 2. Single "Interested" reply button
     await meta.sendReplyButtons(phone, {
-      bodyText: 'Tap your answer below:',
+      bodyText: 'Ready to secure your spot? 🎓',
       buttons: [
-        { id: `yes_book_${bookingDoc._id}`, title: '✅ Yes, Book Now' },
-        { id: `no_later_${bookingDoc._id}`, title: '❌ No, Not Yet' },
+        { id: `yes_book_${bookingDoc._id}`, title: 'Interested 🙋' },
       ],
-    }).catch(() => {
-      // sendReplyButtons may not be defined yet — handled below
-      console.warn('[webhook] sendReplyButtons not available, using text fallback');
     });
 
     console.log(`[webhook] Intent message sent to ${phone} for ${program.name} – ${batch.name}`);
@@ -160,35 +156,26 @@ async function handleProgramConfirm(phone, batchId, programType) {
   }
 }
 
-/* ─── Reply button handler (Yes/No after brochure) ─── */
+/* ─── Reply button handler ─── */
 async function handleReplyButton(phone, buttonId) {
-  const flowId = process.env.WHATSAPP_FLOW_ID;
-  const mode = String(process.env.WHATSAPP_FLOW_STATUS || '').toUpperCase() === 'PUBLISHED' ? 'published' : 'draft';
-
   if (buttonId.startsWith('yes_book_')) {
     const bookingId = buttonId.replace('yes_book_', '');
     const booking = await Booking.findById(bookingId).lean();
     if (!booking) {
-      await meta.sendText(phone, 'Sorry, we could not find your booking. Please try again — type *hi* 🙏');
+      await meta.sendText(phone, 'Sorry, we could not find your booking. Please type *hi* to start again 🙏');
       return;
     }
     const price = (booking.amountPaid || 0).toLocaleString('en-IN');
-    const body =
-      `*Secure Your Spot* 💳\n\n` +
-      `${booking.programName}${booking.batchName ? ' · ' + booking.batchName : ''}\n` +
-      `Amount: *₹${price}*\n\n` +
-      `Tap *Pay Now* to complete your booking via WhatsApp Pay.`;
+    const msg =
+      `*Amazing! We're so happy to have you* 🎉\n\n` +
+      `*${booking.programName}*${booking.batchName ? ' — ' + booking.batchName : ''}\n` +
+      `💰 Total Fee: ₹${price}\n\n` +
+      `Our team will reach out to you shortly with the payment link and next steps.\n\n` +
+      `If you have any questions in the meantime, feel free to reply here 🙏`;
+    await meta.sendText(phone, msg);
 
-    if (flowId) {
-      await meta.sendFlowMessage(phone, {
-        flowId, flowCta: 'Pay Now 💳',
-        headerText: 'Himalayan Yoga Academy',
-        bodyText: body, footerText: 'Himalayan Yoga Academy',
-        flowToken: `pay_${bookingId}`, mode,
-      });
-    } else {
-      await meta.sendText(phone, body + '\n\nOur team will send you a payment link shortly 🙏');
-    }
+    // Update booking status
+    await Booking.findByIdAndUpdate(bookingId, { currentFlow: 'w3', intent: 'confirmed' }).catch(() => {});
   }
 
   if (buttonId.startsWith('no_later_')) {

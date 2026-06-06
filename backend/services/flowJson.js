@@ -39,8 +39,7 @@ function buildFlowJSON() {
         'INFO',
       ],
       TTC_PROGRAM_SELECT:       ['TTC_COURSE_SELECT', 'INFO'],
-      TTC_COURSE_SELECT:        ['TTC_CONFIRM', 'INFO'],
-      TTC_CONFIRM:              [],
+      TTC_COURSE_SELECT:        [],
       PRACTICE_PROGRAM_SELECT:  ['PRACTICE_SESSION_SELECT', 'INFO'],
       PRACTICE_SESSION_SELECT:  ['PRACTICE_CONFIRM', 'INFO'],
       PRACTICE_CONFIRM:         [],
@@ -175,10 +174,12 @@ function buildFlowJSON() {
         },
       },
 
-      /* ─── TTC_COURSE_SELECT ─── */
+      /* ─── TTC_COURSE_SELECT (terminal) ─── */
       {
         id: 'TTC_COURSE_SELECT',
-        title: 'Yoga Teacher Training',
+        title: 'Choose a Batch',
+        terminal: true,
+        success: true,
         data: {
           ttc_banner: { type: 'string', __example__: 'iVBORw0KGgo' },
           has_ttc_banner: { type: 'boolean', __example__: false },
@@ -221,43 +222,12 @@ function buildFlowJSON() {
             },
             {
               type: 'Footer',
-              label: 'Continue',
-              'on-click-action': {
-                name: 'data_exchange',
-                payload: {
-                  action: 'ttc_batch_pick',
-                  selected_batch: '${form.selected_batch}',
-                },
-              },
-            },
-          ],
-        },
-      },
-
-      /* ─── TTC_CONFIRM (terminal) ─── */
-      {
-        id: 'TTC_CONFIRM',
-        title: 'Great Choice!',
-        terminal: true,
-        success: true,
-        data: {
-          confirm_text: { type: 'string', __example__: 'You selected 200hr TTC — Nov 2026' },
-          selected_batch: { type: 'string', __example__: 'batch1' },
-        },
-        layout: {
-          type: 'SingleColumnLayout',
-          children: [
-            { type: 'TextHeading', text: 'Great choice! 🙏' },
-            { type: 'TextBody', text: '${data.confirm_text}' },
-            { type: 'TextBody', text: "We'll send you full details, brochure & payment info on WhatsApp right away." },
-            {
-              type: 'Footer',
-              label: 'Close',
+              label: 'Send Me Details',
               'on-click-action': {
                 name: 'complete',
                 payload: {
                   kind: 'ttc_confirm',
-                  selected_batch: '${data.selected_batch}',
+                  selected_batch: '${form.selected_batch}',
                 },
               },
             },
