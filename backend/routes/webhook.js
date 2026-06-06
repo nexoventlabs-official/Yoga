@@ -63,6 +63,19 @@ async function handleFlowCompletion(msg) {
     return true;
   }
 
+  /* ── Interest response from Interest Capture Flow ── */
+  if (payload.kind === 'interest_response') {
+    const bookingId = payload.booking_id;
+    const interest = payload.interest; // 'interested' | 'not_interested'
+    const phone = String(msg.from || '').replace(/\D/g, '');
+    if (interest === 'interested') {
+      await handleReplyButton(phone, `yes_book_${bookingId}`);
+    } else {
+      await handleReplyButton(phone, `no_later_${bookingId}`);
+    }
+    return true;
+  }
+
   /* ── TTC confirmed ── */
   if (payload.kind === 'ttc_confirm' && payload.selected_batch) {
     await handleProgramConfirm(phone, payload.selected_batch, 'ttc');
@@ -134,14 +147,15 @@ async function handleProgramConfirm(phone, batchId, programType) {
     ];
 
     if (program.brochurePdfUrl) {
-      // Single message: PDF document header + body + buttons
+      // Flow message: PDF document header + body + CTA opens Interest Flow
       const fileName = (program.brochurePdfName || `${program.name}-Brochure.pdf`)
         .replace(/[^\w\d.\-_]+/g, '_');
       await meta.sendReplyButtonsWithDocument(phone, {
         documentUrl: program.brochurePdfUrl,
         documentFilename: fileName,
         bodyText: body,
-        buttons,
+        flowCta: 'Choose Your Interest',
+        flowToken: `interest_${bookingDoc._id}`,
         footerText: 'Himalayan Yoga Academy',
       });
     } else {
@@ -479,3 +493,10 @@ router.post('/meta', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.handleInterestChoice = async function(phone, bookingId, isInterested) {
+  if (isInterested) {
+    await handleReplyButton(phone, `yes_book_${bookingId}`);
+  } else {
+    await handleReplyButton(phone, `no_later_${bookingId}`);
+  }
+};

@@ -366,37 +366,83 @@ async function sendOrderStatus(to, { referenceId, status = 'completed', descript
 }
 
 /**
- * Send a PDF brochure + reply buttons as two separate messages.
- * Document headers on interactive button messages are NOT universally supported
- * across all WhatsApp versions — sending them separately ensures delivery.
+ * Send a PDF brochure as header + body + CTA button that opens the Interest Flow.
+ * The student sees the PDF, reads course details, then taps the CTA to open the
+ * flow inside WhatsApp where they choose Interested / Not Interested.
  *
  * @param {string} to
  * @param {object} opts
  * @param {string} opts.documentUrl
  * @param {string} [opts.documentFilename]
- * @param {string} opts.bodyText          — caption on the PDF message
- * @param {Array<{id: string, title: string}>} opts.buttons
+ * @param {string} opts.bodyText
+ * @param {string} opts.flowCta           CTA button label e.g. "Choose Your Interest"
+ * @param {string} opts.flowToken         unique token e.g. "interest_<bookingId>"
  * @param {string} [opts.footerText]
  */
 async function sendReplyButtonsWithDocument(to, opts) {
+  const { baseUrl, accessToken } = cfg();
   const phone = String(to).replace(/\D/g, '');
-  const { documentUrl, documentFilename, bodyText, buttons, footerText } = opts;
+  const {
+    documentUrl,
+    documentFilename,
+    bodyText,
+    flowCta = 'Choose Your Interest',
+    flowToken,
+    footerText,
+  } = opts;
 
-  // Message 1 — PDF with caption (works on all devices)
-  await sendDocument(phone, documentUrl, {
-    filename: documentFilename,
-    caption: bodyText,
-  });
+  const interestFlowId = process.env.INTEREST_FLOW_ID;
+  const interestFlowStatus = String(process.env.INTEREST_FLOW_STATUS || '').toUpperCase();
+  const mode = interestFlowStatus === 'PUBLISHED' ? 'published' : 'draft';
 
-  // Small delay so messages arrive in order
-  await new Promise((r) => setTimeout(r, 800));
+  if (!interestFlowId) {
+    // Fallback: no interest flow configured — send plain document with caption
+    return sendDocument(phone, documentUrl, {
+      filename: documentFilename,
+      caption: bodyText,
+    });
+  }
 
-  // Message 2 — reply buttons with text header
-  await sendReplyButtons(phone, {
-    bodyText: 'Are you interested in securing your spot?',
-    buttons,
-    footerText: footerText || 'Himalayan Yoga Academy',
-  });
+  const doc = { link: documentUrl };
+  if (documentFilename) doc.filename = documentFilename;
+
+  const payload = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: phone,
+    type: 'interactive',
+    interactive: {
+      type: 'flow',
+      header: { type: 'document', document: doc },
+      body: { text: bodyText },
+      action: {
+        name: 'flow',
+        parameters: {
+          flow_message_version: '3',
+          flow_token: flowToken || `interest_${phone}`,
+          flow_id: interestFlowId,
+          flow_cta: flowCta,
+          mode,
+          flow_action: 'data_exchange',
+        },
+      },
+    },
+  };
+  if (footerText) payload.interactive.footer = { text: footerText };
+
+  try {
+    const { data } = await api.post(`${baseUrl}/messages`, payload, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    return data;
+  } catch (err) {
+    console.error('[metaCloud] sendReplyButtonsWithDocument failed:', JSON.stringify(err.response?.data || err.message));
+    // Fallback to plain document if flow message fails
+    return sendDocument(phone, documentUrl, {
+      filename: documentFilename,
+      caption: bodyText,
+    });
+  }
 }
 
 /**

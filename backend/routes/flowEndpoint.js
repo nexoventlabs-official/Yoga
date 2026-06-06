@@ -343,7 +343,13 @@ router.post('/', async (req, res) => {
     if (action === 'INIT' || action === 'BACK') {
       response = await handleInit(flow_token);
     } else if (action === 'data_exchange') {
-      response = await handleDataExchange({ screen, data, flow_token });
+      // Detect interest flow by token prefix
+      const isInterestFlow = String(flow_token || '').startsWith('interest_');
+      if (isInterestFlow) {
+        response = await handleInterestDataExchange({ screen, data, flow_token });
+      } else {
+        response = await handleDataExchange({ screen, data, flow_token });
+      }
     } else {
       response = await handleInit(flow_token);
     }
@@ -370,6 +376,11 @@ function sendResponse(res, obj, aesKeyBuffer, ivBuffer) {
 
 /* ─────────────────── INIT ─────────────────── */
 async function handleInit(flow_token) {
+  // Interest flow INIT — token format: interest_<bookingId>
+  if (String(flow_token || '').startsWith('interest_')) {
+    return handleInterestInit(flow_token);
+  }
+
   const phone = phoneFromToken(flow_token);
   const images = await loadImagesB64();
   const user = phone ? await User.findOne({ phone }).lean() : null;
@@ -650,3 +661,67 @@ async function handleDataExchange({ screen, data, flow_token }) {
 module.exports = router;
 module.exports.clearImageCache = clearImageCache;
 module.exports.sendIntentMessage = sendIntentMessage;
+
+/* ─────────────────── Interest Flow Handlers ─────────────────── */
+
+async function handleInterestInit(flow_token) {
+  // flow_token format: interest_<bookingId>
+  const bookingId = String(flow_token || '').replace('interest_', '');
+  let summary = 'Please review the course details above.';
+  try {
+    const booking = await Booking.findById(bookingId).lean();
+    if (booking) {
+      const price = (booking.amountPaid || 0).toLocaleString('en-IN');
+      summary =
+        `*${booking.programName}*` +
+        (booking.batchName ? ` — ${booking.batchName}` : '') +
+        `\n\n💰 Fee: ₹${price}\n\nAre you interested in securing your spot?`;
+    }
+  } catch { /* invalid id — use default */ }
+
+  return {
+    screen: 'INTEREST_SELECT',
+    data: {
+      course_summary: summary,
+      booking_id: bookingId,
+    },
+  };
+}
+
+async function handleInterestDataExchange({ screen, data, flow_token }) {
+  if (screen === 'INTEREST_SELECT') {
+    const interest = data?.interest;
+    const bookingId = data?.booking_id || String(flow_token || '').replace('interest_', '');
+    const isInterested = interest === 'interested';
+
+    const message = isInterested
+      ? 'Amazing! We are so happy to have you 🎉\n\nOur team will reach out shortly with payment details and next steps.'
+      : 'No problem at all! Take your time 🙏\n\nWe will follow up with more info over the next few days.';
+
+    // Fire-and-forget: trigger the booking logic asynchronously
+    setImmediate(async () => {
+      try {
+        const booking = await Booking.findById(bookingId).lean();
+        if (!booking) return;
+        // Re-use the same reply button handler logic
+        const { handleInterestChoice } = require('./webhook');
+        if (handleInterestChoice) {
+          await handleInterestChoice(booking.phone, bookingId, isInterested);
+        }
+      } catch (err) {
+        console.error('[flowEndpoint] interest async handler failed:', err.message);
+      }
+    });
+
+    return {
+      screen: 'INTEREST_CONFIRM',
+      data: { message },
+    };
+  }
+
+  // Fallback
+  return {
+    screen: 'INTEREST_CONFIRM',
+    data: { message: 'Thank you for your response 🙏' },
+  };
+}
