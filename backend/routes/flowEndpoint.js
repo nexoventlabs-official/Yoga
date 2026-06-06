@@ -187,7 +187,8 @@ async function buildBatchItems(programId, programType) {
   if (programId) filter.programId = programId;
   if (programType) filter.programType = programType;
   const now = new Date();
-  filter.startDate = { $gte: now };
+  // Show batches whose end date is in the future (covers ongoing courses too)
+  filter.endDate = { $gte: now };
   const batches = await Batch.find(filter).sort({ startDate: 1 }).lean();
   return batches.map((b) => {
     const spotsLeft = Math.max(0, b.spotsTotal - b.spotsBooked);
