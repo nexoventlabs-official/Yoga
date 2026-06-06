@@ -289,12 +289,8 @@ async function sendOrderDetails(to, opts) {
   const paymentSetting = {
     type: 'payment_gateway',
     payment_gateway: {
-      type: 'razorpay',
+      type: 'upi',
       configuration_name: configurationName,
-      razorpay: {
-        receipt: `hya_${String(referenceId).slice(-12)}`,
-        notes: { reference_id: String(referenceId) },
-      },
     },
   };
 
@@ -372,7 +368,8 @@ async function sendOrderStatus(to, { referenceId, status = 'completed', descript
   return data;
 }
 
-
+/**
+ * Send interactive reply buttons with a document (PDF) header — all in one message.
  * @param {string} to
  * @param {object} opts
  * @param {string} opts.documentUrl       Public URL of the PDF
