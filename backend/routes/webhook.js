@@ -85,9 +85,9 @@ async function handleFlowCompletion(msg) {
 }
 
 /**
- * After flow closes (terminal screen 'complete'), send:
- *  1. Brochure PDF as a document message (if available), else plain text
- *  2. A separate reply-button message with a single "Interested 🙋" button
+ * After flow closes (terminal screen 'complete'), send ONE single message:
+ *  - PDF brochure as document header + body text + Interested / Not Interested buttons
+ *  - If no PDF: text header + body + buttons
  */
 async function handleProgramConfirm(phone, batchId, programType) {
   try {
@@ -110,7 +110,7 @@ async function handleProgramConfirm(phone, batchId, programType) {
       `📍 Rishikesh, Uttarakhand\n` +
       `💰 Fee: ₹${price}\n` +
       `🔢 Spots left: ${spotsLeft}\n\n` +
-      `Here are the full details for your selected course. Tap *Interested* below if you'd like to secure your spot!`;
+      `Here are the full details for your selected course. Are you interested in securing your spot?`;
 
     // Save/update pending booking
     const bookingDoc = await Booking.findOneAndUpdate(
@@ -127,28 +127,31 @@ async function handleProgramConfirm(phone, batchId, programType) {
       { upsert: true, new: true }
     );
 
-    // 1. Send brochure PDF as a document, or plain text if no PDF
+    const buttons = [
+      { id: `yes_book_${bookingDoc._id}`, title: 'Interested 🙋' },
+      { id: `no_later_${bookingDoc._id}`, title: 'Not Interested ❌' },
+    ];
+
     if (program.brochurePdfUrl) {
+      // Single message: PDF document header + body + buttons
       const fileName = (program.brochurePdfName || `${program.name}-Brochure.pdf`)
         .replace(/[^\w\d.\-_]+/g, '_');
-      await meta.sendDocument(phone, program.brochurePdfUrl, {
-        filename: fileName,
-        caption: body,
+      await meta.sendReplyButtonsWithDocument(phone, {
+        documentUrl: program.brochurePdfUrl,
+        documentFilename: fileName,
+        bodyText: body,
+        buttons,
+        footerText: 'Himalayan Yoga Academy',
       });
     } else {
-      await meta.sendText(phone, body);
+      // No PDF — plain interactive button message
+      await meta.sendReplyButtons(phone, {
+        headerText: 'Himalayan Yoga Academy',
+        bodyText: body,
+        buttons,
+        footerText: 'Himalayan Yoga Academy',
+      });
     }
-
-    // Small delay so messages arrive in order
-    await new Promise((r) => setTimeout(r, 1200));
-
-    // 2. Single "Interested" reply button
-    await meta.sendReplyButtons(phone, {
-      bodyText: 'Ready to secure your spot? 🎓',
-      buttons: [
-        { id: `yes_book_${bookingDoc._id}`, title: 'Interested 🙋' },
-      ],
-    });
 
     console.log(`[webhook] Intent message sent to ${phone} for ${program.name} – ${batch.name}`);
   } catch (err) {

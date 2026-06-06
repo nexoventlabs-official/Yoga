@@ -228,6 +228,49 @@ async function uploadBusinessPublicKey(publicKeyPem) {
 }
 
 /**
+ * Send interactive reply buttons with a document (PDF) header — all in one message.
+ * @param {string} to
+ * @param {object} opts
+ * @param {string} opts.documentUrl       Public URL of the PDF
+ * @param {string} [opts.documentFilename] Filename shown to recipient
+ * @param {string} opts.bodyText
+ * @param {Array<{id: string, title: string}>} opts.buttons  up to 3
+ * @param {string} [opts.footerText]
+ */
+async function sendReplyButtonsWithDocument(to, opts) {
+  const { baseUrl, accessToken } = cfg();
+  const phone = String(to).replace(/\D/g, '');
+  const { documentUrl, documentFilename, bodyText, buttons, footerText } = opts;
+
+  const doc = { link: documentUrl };
+  if (documentFilename) doc.filename = documentFilename;
+
+  const payload = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: phone,
+    type: 'interactive',
+    interactive: {
+      type: 'button',
+      header: { type: 'document', document: doc },
+      body: { text: bodyText },
+      action: {
+        buttons: buttons.slice(0, 3).map((b) => ({
+          type: 'reply',
+          reply: { id: b.id.substring(0, 256), title: b.title.substring(0, 20) },
+        })),
+      },
+    },
+  };
+  if (footerText) payload.interactive.footer = { text: footerText };
+
+  const { data } = await api.post(`${baseUrl}/messages`, payload, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  return data;
+}
+
+/**
  * Send interactive reply buttons (up to 3 buttons).
  * @param {string} to
  * @param {object} opts
@@ -273,6 +316,7 @@ module.exports = {
   sendDocument,
   sendFlowMessage,
   sendReplyButtons,
+  sendReplyButtonsWithDocument,
   createFlow,
   updateFlowJSON,
   publishFlow,
