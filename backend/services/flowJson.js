@@ -28,7 +28,7 @@ function buildFlowJSON() {
     data_api_version: '3.0',
     routing_model: {
       SERVICE_SELECT: [
-        'TTC_COURSE_SELECT',
+        'TTC_PROGRAM_SELECT',
         'PRACTICE_PROGRAM_SELECT',
         'RETREAT_PROGRAM_SELECT',
         'REGISTER',
@@ -38,6 +38,7 @@ function buildFlowJSON() {
         'PDFS',
         'INFO',
       ],
+      TTC_PROGRAM_SELECT: ['TTC_COURSE_SELECT'],
       TTC_COURSE_SELECT: ['TTC_CONFIRM'],
       TTC_CONFIRM: [],
       PRACTICE_PROGRAM_SELECT: ['PRACTICE_SESSION_SELECT'],
@@ -109,6 +110,65 @@ function buildFlowJSON() {
               'on-click-action': {
                 name: 'data_exchange',
                 payload: { selected_service: '${form.selected_service}' },
+              },
+            },
+          ],
+        },
+      },
+
+      /* ─── TTC_PROGRAM_SELECT ─── */
+      {
+        id: 'TTC_PROGRAM_SELECT',
+        title: 'TTC Programs',
+        data: {
+          ttc_banner: { type: 'string', __example__: 'iVBORw0KGgo' },
+          has_ttc_banner: { type: 'boolean', __example__: false },
+          programs: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                title: { type: 'string' },
+                description: { type: 'string' },
+                image: { type: 'string' },
+              },
+            },
+            __example__: [
+              { id: 'p1', title: '200hr Yoga Teacher Training', description: '28 days · ₹45,000' },
+            ],
+          },
+        },
+        layout: {
+          type: 'SingleColumnLayout',
+          children: [
+            {
+              type: 'Image',
+              src: '${data.ttc_banner}',
+              width: 1000,
+              height: 125,
+              'scale-type': 'cover',
+              'alt-text': 'Yoga Teacher Training',
+              visible: '${data.has_ttc_banner}',
+            },
+            { type: 'TextHeading', text: 'Yoga Teacher Training 🎓' },
+            { type: 'TextBody', text: 'YA-certified · Rishikesh, Uttarakhand\n\nSelect a course:' },
+            {
+              type: 'RadioButtonsGroup',
+              name: 'selected_program',
+              label: 'TTC Programs',
+              required: true,
+              'data-source': '${data.programs}',
+            },
+            {
+              type: 'Footer',
+              label: 'Continue',
+              'on-click-action': {
+                name: 'data_exchange',
+                payload: {
+                  action: 'ttc_program_pick',
+                  selected_program: '${form.selected_program}',
+                },
               },
             },
           ],

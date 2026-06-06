@@ -394,16 +394,16 @@ async function handleDataExchange({ screen, data, flow_token }) {
     const sel = data?.selected_service;
 
     if (sel === 'ttc') {
-      const batches = await buildBatchItems(null, 'ttc');
-      if (!batches.length) {
-        return { screen: 'INFO', data: { info_title: 'No batches available', info_body: 'No TTC batches are scheduled right now. Please check back soon or send an Enquiry 🙏' } };
+      const programs = await buildProgramItems('ttc');
+      if (!programs.length) {
+        return { screen: 'INFO', data: { info_title: 'No programs available', info_body: 'No TTC programs are listed right now. Please send an Enquiry 🙏' } };
       }
       return {
-        screen: 'TTC_COURSE_SELECT',
+        screen: 'TTC_PROGRAM_SELECT',
         data: {
           ttc_banner: images.banner_ttc || '',
           has_ttc_banner: !!images.banner_ttc,
-          batches,
+          programs,
         },
       };
     }
@@ -488,6 +488,24 @@ async function handleDataExchange({ screen, data, flow_token }) {
     }
 
     return handleInit(flow_token);
+  }
+
+  /* ── TTC program picked → show batches ── */
+  if (screen === 'TTC_PROGRAM_SELECT' && data?.action === 'ttc_program_pick') {
+    const programId = data.selected_program;
+    const program = programId ? await Program.findById(programId).lean() : null;
+    const batches = await buildBatchItems(programId, 'ttc');
+    if (!batches.length) {
+      return { screen: 'INFO', data: { info_title: 'No batches available', info_body: 'No batches are scheduled for this program right now. Please check back soon or send an Enquiry 🙏' } };
+    }
+    return {
+      screen: 'TTC_COURSE_SELECT',
+      data: {
+        ttc_banner: images.banner_ttc || '',
+        has_ttc_banner: !!images.banner_ttc,
+        batches,
+      },
+    };
   }
 
   /* ── TTC batch picked ── */
